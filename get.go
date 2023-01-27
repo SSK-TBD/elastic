@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/olivere/elastic/v7/uritemplates"
+	"github.com/SSK-TBD/elastic/v7/uritemplates"
 )
 
 // GetService allows to get a typed JSON document from the index based
