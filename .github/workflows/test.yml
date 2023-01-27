@@ -1,41 +1,29 @@
+name: Test
+
 on:
   push:
     branches:
-      - '*.v7'
+      - 'main'
   pull_request:
-    branches:
-      - '*.v7'
-name: Test v7
+
 jobs:
   test:
-    strategy:
-      matrix:
-        go: [1.17.x, 1.18.x]
-        os: [ubuntu-latest]
-    name: Run ${{ matrix.go }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Test
+    runs-on: ubuntu-latest
     steps:
     - name: Prepare tests
       run: |
         sudo apt-get install -y netcat
         sudo sysctl -w vm.max_map_count=262144
 
-    - name: Setup Go ${{ matrix.go }}
-      uses: actions/setup-go@v2
-      with:
-        go-version: ${{ matrix.go }}
-
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
 
-    - uses: actions/cache@v2
+    - name: Setup Go
+      uses: actions/setup-go@v3
       with:
-        path: |
-          ~/.cache/go-build
-          ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
+        go-version-file: 'go.mod'
+        cache: true
 
     - name: Run Docker containers
       run: docker-compose up -d
