@@ -1968,53 +1968,6 @@ func (c *Client) TasksGetTask() *TasksGetTaskService {
 // TODO Nodes Stats
 // TODO Nodes hot_threads
 
-// -- Snapshot and Restore --
-
-// SnapshotStatus returns information about the status of a snapshot.
-func (c *Client) SnapshotStatus() *SnapshotStatusService {
-	return NewSnapshotStatusService(c)
-}
-
-// SnapshotCreate creates a snapshot.
-func (c *Client) SnapshotCreate(repository string, snapshot string) *SnapshotCreateService {
-	return NewSnapshotCreateService(c).Repository(repository).Snapshot(snapshot)
-}
-
-// SnapshotCreateRepository creates or updates a snapshot repository.
-func (c *Client) SnapshotCreateRepository(repository string) *SnapshotCreateRepositoryService {
-	return NewSnapshotCreateRepositoryService(c).Repository(repository)
-}
-
-// SnapshotDelete deletes a snapshot in a snapshot repository.
-func (c *Client) SnapshotDelete(repository string, snapshot string) *SnapshotDeleteService {
-	return NewSnapshotDeleteService(c).Repository(repository).Snapshot(snapshot)
-}
-
-// SnapshotDeleteRepository deletes a snapshot repository.
-func (c *Client) SnapshotDeleteRepository(repositories ...string) *SnapshotDeleteRepositoryService {
-	return NewSnapshotDeleteRepositoryService(c).Repository(repositories...)
-}
-
-// SnapshotGetRepository gets a snapshot repository.
-func (c *Client) SnapshotGetRepository(repositories ...string) *SnapshotGetRepositoryService {
-	return NewSnapshotGetRepositoryService(c).Repository(repositories...)
-}
-
-// SnapshotGet lists snapshot for a repository.
-func (c *Client) SnapshotGet(repository string) *SnapshotGetService {
-	return NewSnapshotGetService(c).Repository(repository)
-}
-
-// SnapshotVerifyRepository verifies a snapshot repository.
-func (c *Client) SnapshotVerifyRepository(repository string) *SnapshotVerifyRepositoryService {
-	return NewSnapshotVerifyRepositoryService(c).Repository(repository)
-}
-
-// SnapshotRestore restores the specified indices from a given snapshot
-func (c *Client) SnapshotRestore(repository string, snapshot string) *SnapshotRestoreService {
-	return NewSnapshotRestoreService(c).Repository(repository).Snapshot(snapshot)
-}
-
 // -- Scripting APIs --
 
 // GetScript reads a stored script in Elasticsearch.
