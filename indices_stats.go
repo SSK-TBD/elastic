@@ -488,7 +488,6 @@ type IndexStatsSegments struct {
 	FixedBitSet               string                                      `json:"fixed_bit_set"` // e.g. "61.3kb"
 	FixedBitSetInBytes        int64                                       `json:"fixed_bit_set_memory_in_bytes"`
 	MaxUnsafeAutoIDTimestamp  int64                                       `json:"max_unsafe_auto_id_timestamp"`
-	FileSizes                 map[string]*ClusterStatsIndicesSegmentsFile `json:"file_sizes"`
 }
 
 type IndexStatsTranslog struct {

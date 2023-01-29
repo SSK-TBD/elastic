@@ -290,17 +290,6 @@ func NewSimpleClient(options ...ClientOptionFunc) (*Client, error) {
 		return nil, err
 	}
 
-	// Check the required plugins
-	for _, plugin := range c.requiredPlugins {
-		found, err := c.HasPlugin(plugin)
-		if err != nil {
-			return nil, err
-		}
-		if !found {
-			return nil, fmt.Errorf("elastic: plugin %s not found", plugin)
-		}
-	}
-
 	c.mu.Lock()
 	c.running = true
 	c.mu.Unlock()
@@ -393,17 +382,6 @@ func DialContext(ctx context.Context, options ...ClientOptionFunc) (*Client, err
 	// Ensure that we have at least one connection available
 	if err := c.mustActiveConn(); err != nil {
 		return nil, err
-	}
-
-	// Check the required plugins
-	for _, plugin := range c.requiredPlugins {
-		found, err := c.HasPlugin(plugin)
-		if err != nil {
-			return nil, err
-		}
-		if !found {
-			return nil, fmt.Errorf("elastic: plugin %s not found", plugin)
-		}
 	}
 
 	if c.snifferEnabled {
@@ -1914,29 +1892,6 @@ func (c *Client) IngestSimulatePipeline() *IngestSimulatePipelineService {
 	return NewIngestSimulatePipelineService(c)
 }
 
-// -- Cluster APIs --
-
-// ClusterHealth retrieves the health of the cluster.
-func (c *Client) ClusterHealth() *ClusterHealthService {
-	return NewClusterHealthService(c)
-}
-
-// ClusterReroute allows for manual changes to the allocation of
-// individual shards in the cluster.
-func (c *Client) ClusterReroute() *ClusterRerouteService {
-	return NewClusterRerouteService(c)
-}
-
-// ClusterState retrieves the state of the cluster.
-func (c *Client) ClusterState() *ClusterStateService {
-	return NewClusterStateService(c)
-}
-
-// ClusterStats retrieves cluster statistics.
-func (c *Client) ClusterStats() *ClusterStatsService {
-	return NewClusterStatsService(c)
-}
-
 // NodesInfo retrieves one or more or all of the cluster nodes information.
 func (c *Client) NodesInfo() *NodesInfoService {
 	return NewNodesInfoService(c)
@@ -1999,33 +1954,4 @@ func (c *Client) IndexNames() ([]string, error) {
 		names = append(names, name)
 	}
 	return names, nil
-}
-
-// WaitForStatus waits for the cluster to have the given status.
-// This is a shortcut method for the ClusterHealth service.
-//
-// WaitForStatus waits for the specified timeout, e.g. "10s".
-// If the cluster will have the given state within the timeout, nil is returned.
-// If the request timed out, ErrTimeout is returned.
-func (c *Client) WaitForStatus(status string, timeout string) error {
-	health, err := c.ClusterHealth().WaitForStatus(status).Timeout(timeout).Do(context.Background())
-	if err != nil {
-		return err
-	}
-	if health.TimedOut {
-		return ErrTimeout
-	}
-	return nil
-}
-
-// WaitForGreenStatus waits for the cluster to have the "green" status.
-// See WaitForStatus for more details.
-func (c *Client) WaitForGreenStatus(timeout string) error {
-	return c.WaitForStatus("green", timeout)
-}
-
-// WaitForYellowStatus waits for the cluster to have the "yellow" status.
-// See WaitForStatus for more details.
-func (c *Client) WaitForYellowStatus(timeout string) error {
-	return c.WaitForStatus("yellow", timeout)
 }
