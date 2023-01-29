@@ -7,7 +7,6 @@ package elastic
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -1096,22 +1095,6 @@ func TestClientSelectConnAllDead(t *testing.T) {
 	}
 }
 
-// -- ElasticsearchVersion --
-
-func TestElasticsearchVersion(t *testing.T) {
-	client, err := NewClient()
-	if err != nil {
-		t.Fatal(err)
-	}
-	version, err := client.ElasticsearchVersion(DefaultURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if version == "" {
-		t.Errorf("expected a version number, got: %q", version)
-	}
-}
-
 // -- IndexNames --
 
 func TestIndexNames(t *testing.T) {
@@ -1152,14 +1135,6 @@ func TestPerformRequest(t *testing.T) {
 	if res == nil {
 		t.Fatal("expected response to be != nil")
 	}
-
-	ret := new(PingResult)
-	if err := json.Unmarshal(res.Body, ret); err != nil {
-		t.Fatalf("expected no error on decode; got: %v", err)
-	}
-	if ret.ClusterName == "" {
-		t.Errorf("expected cluster name; got: %q", ret.ClusterName)
-	}
 }
 
 func TestPerformRequestWithStream(t *testing.T) {
@@ -1184,14 +1159,6 @@ func TestPerformRequestWithStream(t *testing.T) {
 	if res.Body != nil {
 		t.Fatal("expected res.Body to be == nil")
 	}
-
-	ret := new(PingResult)
-	if err := json.NewDecoder(res.BodyReader).Decode(ret); err != nil {
-		t.Fatalf("expected no error on decode; got: %v", err)
-	}
-	if ret.ClusterName == "" {
-		t.Errorf("expected cluster name; got: %q", ret.ClusterName)
-	}
 }
 
 func TestPerformRequestWithSimpleClient(t *testing.T) {
@@ -1208,14 +1175,6 @@ func TestPerformRequestWithSimpleClient(t *testing.T) {
 	}
 	if res == nil {
 		t.Fatal("expected response to be != nil")
-	}
-
-	ret := new(PingResult)
-	if err := json.Unmarshal(res.Body, ret); err != nil {
-		t.Fatalf("expected no error on decode; got: %v", err)
-	}
-	if ret.ClusterName == "" {
-		t.Errorf("expected cluster name; got: %q", ret.ClusterName)
 	}
 }
 
@@ -1237,14 +1196,6 @@ func TestPerformRequestWithLogger(t *testing.T) {
 	}
 	if res == nil {
 		t.Fatal("expected response to be != nil")
-	}
-
-	ret := new(PingResult)
-	if err := json.Unmarshal(res.Body, ret); err != nil {
-		t.Fatalf("expected no error on decode; got: %v", err)
-	}
-	if ret.ClusterName == "" {
-		t.Errorf("expected cluster name; got: %q", ret.ClusterName)
 	}
 
 	got := w.String()
@@ -1279,14 +1230,6 @@ func TestPerformRequestWithLoggerAndTracer(t *testing.T) {
 	}
 	if res == nil {
 		t.Fatal("expected response to be != nil")
-	}
-
-	ret := new(PingResult)
-	if err := json.Unmarshal(res.Body, ret); err != nil {
-		t.Fatalf("expected no error on decode; got: %v", err)
-	}
-	if ret.ClusterName == "" {
-		t.Errorf("expected cluster name; got: %q", ret.ClusterName)
 	}
 
 	lgot := lw.String()
@@ -1344,14 +1287,6 @@ func TestPerformRequestWithCustomLogger(t *testing.T) {
 	}
 	if res == nil {
 		t.Fatal("expected response to be != nil")
-	}
-
-	ret := new(PingResult)
-	if err := json.Unmarshal(res.Body, ret); err != nil {
-		t.Fatalf("expected no error on decode; got: %v", err)
-	}
-	if ret.ClusterName == "" {
-		t.Errorf("expected cluster name; got: %q", ret.ClusterName)
 	}
 
 	got := logger.out.String()
@@ -1849,13 +1784,5 @@ func testPerformRequestWithCompression(t *testing.T, hc *http.Client) {
 	}
 	if res == nil {
 		t.Fatal("expected response to be != nil")
-	}
-
-	ret := new(PingResult)
-	if err := json.Unmarshal(res.Body, ret); err != nil {
-		t.Fatalf("expected no error on decode; got: %v", err)
-	}
-	if ret.ClusterName == "" {
-		t.Errorf("expected cluster name; got: %q", ret.ClusterName)
 	}
 }

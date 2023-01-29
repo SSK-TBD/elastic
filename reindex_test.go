@@ -389,13 +389,6 @@ func TestReindexAsync(t *testing.T) {
 
 func TestReindexWithWaitForCompletionTrueCannotBeStarted(t *testing.T) {
 	client := setupTestClientAndCreateIndexAndAddDocs(t)
-	esversion, err := client.ElasticsearchVersion(DefaultURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if esversion < "2.3.0" {
-		t.Skipf("Elasticsearch %v does not support Reindex API yet", esversion)
-	}
 
 	sourceCount, err := client.Count(testIndexName).Do(context.TODO())
 	if err != nil {

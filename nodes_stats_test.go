@@ -15,16 +15,6 @@ func TestNodesStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// TODO(oe) Remove this hack after a fix for https://github.com/elastic/elasticsearch/issues/78311 is released
-	version, err := client.ElasticsearchVersion(DefaultURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if version == "7.15.0" || version == "7.15.1" {
-		t.Skipf("skipping NodesStats test for %s because of https://github.com/elastic/elasticsearch/issues/78311", version)
-		return
-	}
-
 	info, err := client.NodesStats().Human(true).Pretty(true).Do(context.TODO())
 	if err != nil {
 		t.Fatal(err)

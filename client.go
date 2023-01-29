@@ -1988,16 +1988,6 @@ func (c *Client) DeleteScript() *DeleteScriptService {
 
 // -- Helpers and shortcuts --
 
-// ElasticsearchVersion returns the version number of Elasticsearch
-// running on the given URL.
-func (c *Client) ElasticsearchVersion(url string) (string, error) {
-	res, _, err := c.Ping(url).Do(context.Background())
-	if err != nil {
-		return "", err
-	}
-	return res.Version.Number, nil
-}
-
 // IndexNames returns the names of all indices in the cluster.
 func (c *Client) IndexNames() ([]string, error) {
 	res, err := c.IndexGetSettings().Index("_all").Do(context.Background())
@@ -2009,15 +1999,6 @@ func (c *Client) IndexNames() ([]string, error) {
 		names = append(names, name)
 	}
 	return names, nil
-}
-
-// Ping checks if a given node in a cluster exists and (optionally)
-// returns some basic information about the Elasticsearch server,
-// e.g. the Elasticsearch version number.
-//
-// Notice that you need to specify a URL here explicitly.
-func (c *Client) Ping(url string) *PingService {
-	return NewPingService(c).URL(url)
 }
 
 // WaitForStatus waits for the cluster to have the given status.
