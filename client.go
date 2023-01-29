@@ -1551,16 +1551,6 @@ func (c *Client) UpdateByQuery(indices ...string) *UpdateByQueryService {
 	return NewUpdateByQueryService(c).Index(indices...)
 }
 
-// Bulk is the entry point to mass insert/update/delete documents.
-func (c *Client) Bulk() *BulkService {
-	return NewBulkService(c)
-}
-
-// BulkProcessor allows setting up a concurrent processor of bulk requests.
-func (c *Client) BulkProcessor() *BulkProcessorService {
-	return NewBulkProcessorService(c)
-}
-
 // Reindex copies data from a source index into a destination index.
 //
 // See https://www.elastic.co/guide/en/elasticsearch/reference/7.0/docs-reindex.html
