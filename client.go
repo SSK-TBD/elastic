@@ -1890,61 +1890,6 @@ func (c *Client) GetFieldMapping() *IndicesGetFieldMappingService {
 	return NewIndicesGetFieldMappingService(c)
 }
 
-// -- cat APIs --
-
-// TODO cat nodes
-// TODO cat pending tasks
-// TODO cat plugins
-// TODO cat recovery
-// TODO cat thread pool
-// TODO cat shards
-// TODO cat segments
-
-// CatMaster returns information about the master node
-func (c *Client) CatMaster() *CatMasterService {
-	return NewCatMasterService(c)
-}
-
-// CatFielddata returns information about the amount of heap memory currently used by the field data cache.
-func (c *Client) CatFielddata() *CatFielddataService {
-	return NewCatFielddataService(c)
-}
-
-// CatAliases returns information about aliases.
-func (c *Client) CatAliases() *CatAliasesService {
-	return NewCatAliasesService(c)
-}
-
-// CatAllocation returns information about the allocation across nodes.
-func (c *Client) CatAllocation() *CatAllocationService {
-	return NewCatAllocationService(c)
-}
-
-// CatCount returns document counts for indices.
-func (c *Client) CatCount() *CatCountService {
-	return NewCatCountService(c)
-}
-
-// CatHealth returns information about cluster health.
-func (c *Client) CatHealth() *CatHealthService {
-	return NewCatHealthService(c)
-}
-
-// CatIndices returns information about indices.
-func (c *Client) CatIndices() *CatIndicesService {
-	return NewCatIndicesService(c)
-}
-
-// CatShards returns information about shards.
-func (c *Client) CatShards() *CatShardsService {
-	return NewCatShardsService(c)
-}
-
-// CatSnapshots returns information about snapshots.
-func (c *Client) CatSnapshots() *CatSnapshotsService {
-	return NewCatSnapshotsService(c)
-}
-
 // -- Ingest APIs --
 
 // IngestPutPipeline adds pipelines and updates existing pipelines in
