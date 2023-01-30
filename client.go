@@ -8,19 +8,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/pkg/errors"
-
-	"github.com/SSK-TBD/elastic/v7/config"
 )
 
 const (
@@ -30,10 +26,6 @@ const (
 	// DefaultURL is the default endpoint of Elasticsearch on the local machine.
 	// It is used e.g. when initializing a new Client without a specific URL.
 	DefaultURL = "http://127.0.0.1:9200"
-
-	// DefaultScheme is the default protocol scheme to use when sniffing
-	// the Elasticsearch cluster.
-	DefaultScheme = "http"
 
 	// DefaultHealthcheckEnabled specifies if healthchecks are enabled by default.
 	DefaultHealthcheckEnabled = true
@@ -52,24 +44,6 @@ const (
 	// DefaultHealthcheckInterval is the default interval between
 	// two health checks of the nodes in the cluster.
 	DefaultHealthcheckInterval = 60 * time.Second
-
-	// DefaultSnifferEnabled specifies if the sniffer is enabled by default.
-	DefaultSnifferEnabled = true
-
-	// DefaultSnifferInterval is the interval between two sniffing procedures,
-	// i.e. the lookup of all nodes in the cluster and their addition/removal
-	// from the list of actual connections.
-	DefaultSnifferInterval = 15 * time.Minute
-
-	// DefaultSnifferTimeoutStartup is the default timeout for the sniffing
-	// process that is initiated while creating a new client. For subsequent
-	// sniffing processes, DefaultSnifferTimeout is used (by default).
-	DefaultSnifferTimeoutStartup = 5 * time.Second
-
-	// DefaultSnifferTimeout is the default timeout after which the
-	// sniffing process times out. Notice that for the initial sniffing
-	// process, DefaultSnifferTimeoutStartup is used.
-	DefaultSnifferTimeout = 2 * time.Second
 
 	// DefaultSendGetBodyAs is the HTTP method to use when elastic is sending
 	// a GET request with a body.
@@ -132,11 +106,6 @@ type Client struct {
 	healthcheckTimeout        time.Duration   // time the healthcheck waits for a response from Elasticsearch
 	healthcheckInterval       time.Duration   // interval between healthchecks
 	healthcheckStop           chan bool       // notify healthchecker to stop, and notify back
-	snifferEnabled            bool            // sniffer enabled or disabled
-	snifferTimeoutStartup     time.Duration   // time the sniffer waits for a response from nodes info API on startup
-	snifferTimeout            time.Duration   // time the sniffer waits for a response from nodes info API
-	snifferInterval           time.Duration   // interval between sniffing
-	snifferStop               chan bool       // notify sniffer to stop, and notify back
 	decoder                   Decoder         // used to decode data sent from Elasticsearch
 	basicAuthUsername         string          // username for HTTP Basic Auth
 	basicAuthPassword         string          // password for HTTP Basic Auth
@@ -164,25 +133,6 @@ type Client struct {
 //
 // If no URL is configured, Elastic uses DefaultURL by default.
 //
-// If the sniffer is enabled (the default), the new client then sniffes
-// the cluster via the Nodes Info API
-// (see https://www.elastic.co/guide/en/elasticsearch/reference/7.0/cluster-nodes-info.html#cluster-nodes-info).
-// It uses the URLs specified by the caller. The caller is responsible
-// to only pass a list of URLs of nodes that belong to the same cluster.
-// This sniffing process is run on startup and periodically.
-// Use SnifferInterval to set the interval between two sniffs (default is
-// 15 minutes). In other words: By default, the client will find new nodes
-// in the cluster and remove those that are no longer available every
-// 15 minutes. Disable the sniffer by passing SetSniff(false) to NewClient.
-//
-// The list of nodes found in the sniffing process will be used to make
-// connections to the REST API of Elasticsearch. These nodes are also
-// periodically checked in a shorter time frame. This process is called
-// a health check. By default, a health check is done every 60 seconds.
-// You can set a shorter or longer interval by SetHealthcheckInterval.
-// Disabling health checks is not recommended, but can be done by
-// SetHealthcheck(false).
-//
 // Connections are automatically marked as dead or healthy while
 // making requests to Elasticsearch. When a request fails, Elastic will
 // call into the Retry strategy which can be specified with SetRetry.
@@ -194,34 +144,12 @@ type Client struct {
 // If no HttpClient is configured, then http.DefaultClient is used.
 // You can use your own http.Client with some http.Transport for
 // advanced scenarios.
-//
-// An error is also returned when some configuration option is invalid or
-// the new client cannot sniff the cluster (if enabled).
 func NewClient(options ...ClientOptionFunc) (*Client, error) {
-	return DialContext(context.Background(), options...)
-}
-
-// NewClientFromConfig initializes a client from a configuration.
-func NewClientFromConfig(cfg *config.Config) (*Client, error) {
-	options, err := configToOptions(cfg)
-	if err != nil {
-		return nil, err
-	}
 	return DialContext(context.Background(), options...)
 }
 
 // NewSimpleClient creates a new short-lived Client that can be used in
 // use cases where you need e.g. one client per request.
-//
-// While NewClient by default sets up e.g. periodic health checks
-// and sniffing for new nodes in separate goroutines, NewSimpleClient does
-// not and is meant as a simple replacement where you don't need all the
-// heavy lifting of NewClient.
-//
-// NewSimpleClient does the following by default: First, all health checks
-// are disabled, including timeouts and periodic checks. Second, sniffing
-// is disabled, including timeouts and periodic checks. The number of retries
-// is set to 1. NewSimpleClient also does not start any goroutines.
 //
 // Notice that you can still override settings by passing additional options,
 // just like with NewClient.
@@ -230,18 +158,12 @@ func NewSimpleClient(options ...ClientOptionFunc) (*Client, error) {
 		c:                         http.DefaultClient,
 		conns:                     make([]*conn, 0),
 		cindex:                    -1,
-		scheme:                    DefaultScheme,
 		decoder:                   &DefaultDecoder{},
 		healthcheckEnabled:        false,
 		healthcheckTimeoutStartup: off,
 		healthcheckTimeout:        off,
 		healthcheckInterval:       off,
 		healthcheckStop:           make(chan bool),
-		snifferEnabled:            false,
-		snifferTimeoutStartup:     off,
-		snifferTimeout:            off,
-		snifferInterval:           off,
-		snifferStop:               make(chan bool),
 		sendGetBodyAs:             DefaultSendGetBodyAs,
 		gzipEnabled:               DefaultGzipEnabled,
 		retryStatusCodes:          nil,       // no automatic retries for specific HTTP status codes
@@ -302,18 +224,12 @@ func DialContext(ctx context.Context, options ...ClientOptionFunc) (*Client, err
 		c:                         http.DefaultClient,
 		conns:                     make([]*conn, 0),
 		cindex:                    -1,
-		scheme:                    DefaultScheme,
 		decoder:                   &DefaultDecoder{},
 		healthcheckEnabled:        DefaultHealthcheckEnabled,
 		healthcheckTimeoutStartup: DefaultHealthcheckTimeoutStartup,
 		healthcheckTimeout:        DefaultHealthcheckTimeout,
 		healthcheckInterval:       DefaultHealthcheckInterval,
 		healthcheckStop:           make(chan bool),
-		snifferEnabled:            DefaultSnifferEnabled,
-		snifferTimeoutStartup:     DefaultSnifferTimeoutStartup,
-		snifferTimeout:            DefaultSnifferTimeout,
-		snifferInterval:           DefaultSnifferInterval,
-		snifferStop:               make(chan bool),
 		sendGetBodyAs:             DefaultSendGetBodyAs,
 		gzipEnabled:               DefaultGzipEnabled,
 		retryStatusCodes:          nil,       // no automatic retries for specific HTTP status codes
@@ -376,61 +292,6 @@ func DialContext(ctx context.Context, options ...ClientOptionFunc) (*Client, err
 	return c, nil
 }
 
-// DialWithConfig will use the configuration settings parsed from config package
-// to connect to Elasticsearch.
-//
-// The context is honoured in terms of e.g. cancellation.
-func DialWithConfig(ctx context.Context, cfg *config.Config) (*Client, error) {
-	options, err := configToOptions(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return DialContext(ctx, options...)
-}
-
-func configToOptions(cfg *config.Config) ([]ClientOptionFunc, error) {
-	var options []ClientOptionFunc
-	if cfg != nil {
-		if cfg.URL != "" {
-			options = append(options, SetURL(cfg.URL))
-		}
-		if cfg.Errorlog != "" {
-			f, err := os.OpenFile(cfg.Errorlog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				return nil, errors.Wrap(err, "unable to initialize error log")
-			}
-			l := log.New(f, "", 0)
-			options = append(options, SetErrorLog(l))
-		}
-		if cfg.Tracelog != "" {
-			f, err := os.OpenFile(cfg.Tracelog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				return nil, errors.Wrap(err, "unable to initialize trace log")
-			}
-			l := log.New(f, "", 0)
-			options = append(options, SetTraceLog(l))
-		}
-		if cfg.Infolog != "" {
-			f, err := os.OpenFile(cfg.Infolog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				return nil, errors.Wrap(err, "unable to initialize info log")
-			}
-			l := log.New(f, "", 0)
-			options = append(options, SetInfoLog(l))
-		}
-		if cfg.Username != "" || cfg.Password != "" {
-			options = append(options, SetBasicAuth(cfg.Username, cfg.Password))
-		}
-		if cfg.Sniff != nil {
-			options = append(options, SetSniff(*cfg.Sniff))
-		}
-		if cfg.Healthcheck != nil {
-			options = append(options, SetHealthcheck(*cfg.Healthcheck))
-		}
-	}
-	return options, nil
-}
-
 // SetHttpClient can be used to specify the http.Client to use when making
 // HTTP requests to Elasticsearch.
 func SetHttpClient(httpClient Doer) ClientOptionFunc {
@@ -480,45 +341,6 @@ func SetURL(urls ...string) ClientOptionFunc {
 func SetScheme(scheme string) ClientOptionFunc {
 	return func(c *Client) error {
 		c.scheme = scheme
-		return nil
-	}
-}
-
-// SetSniff enables or disables the sniffer (enabled by default).
-func SetSniff(enabled bool) ClientOptionFunc {
-	return func(c *Client) error {
-		c.snifferEnabled = enabled
-		return nil
-	}
-}
-
-// SetSnifferTimeoutStartup sets the timeout for the sniffer that is used
-// when creating a new client. The default is 5 seconds. Notice that the
-// timeout being used for subsequent sniffing processes is set with
-// SetSnifferTimeout.
-func SetSnifferTimeoutStartup(timeout time.Duration) ClientOptionFunc {
-	return func(c *Client) error {
-		c.snifferTimeoutStartup = timeout
-		return nil
-	}
-}
-
-// SetSnifferTimeout sets the timeout for the sniffer that finds the
-// nodes in a cluster. The default is 2 seconds. Notice that the timeout
-// used when creating a new client on startup is usually greater and can
-// be set with SetSnifferTimeoutStartup.
-func SetSnifferTimeout(timeout time.Duration) ClientOptionFunc {
-	return func(c *Client) error {
-		c.snifferTimeout = timeout
-		return nil
-	}
-}
-
-// SetSnifferInterval sets the interval between two sniffing processes.
-// The default interval is 15 minutes.
-func SetSnifferInterval(interval time.Duration) ClientOptionFunc {
-	return func(c *Client) error {
-		c.snifferInterval = interval
 		return nil
 	}
 }
@@ -716,11 +538,6 @@ func (c *Client) Stop() {
 	if c.healthcheckEnabled {
 		c.healthcheckStop <- true
 		<-c.healthcheckStop
-	}
-
-	if c.snifferEnabled {
-		c.snifferStop <- true
-		<-c.snifferStop
 	}
 
 	c.mu.Lock()
@@ -1007,17 +824,6 @@ func (c *Client) next() (*conn, error) {
 		conn := c.conns[c.cindex]
 		if !conn.IsDead() {
 			return conn, nil
-		}
-	}
-
-	// We have a deadlock here: All nodes are marked as dead.
-	// If sniffing is disabled, connections will never be marked alive again.
-	// So we are marking them as alive--if sniffing is disabled.
-	// They'll then be picked up in the next call to PerformRequest.
-	if !c.snifferEnabled {
-		c.errorf("elastic: all %d nodes marked as dead; resurrecting them to prevent deadlock", len(c.conns))
-		for _, conn := range c.conns {
-			conn.MarkAsAlive()
 		}
 	}
 

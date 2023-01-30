@@ -291,7 +291,6 @@ var (
 	logDeprecations = flag.String("deprecations", "off", "log or fail on deprecation warnings")
 	logTypesRemoval = flag.Bool("types-removal", false, "log deprecation warnings regarding types removal")
 	strict          = flag.Bool("strict-decoder", false, "treat missing unknown fields in response as errors")
-	noSniff         = flag.Bool("no-sniff", false, "allows to disable sniffing globally")
 	noHealthcheck   = flag.Bool("no-healthcheck", false, "allows to disable healthchecks globally")
 )
 
