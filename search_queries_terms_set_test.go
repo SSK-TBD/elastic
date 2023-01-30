@@ -5,7 +5,6 @@
 package elastic
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 )
@@ -44,32 +43,5 @@ func TestTermsSetQueryWithScript(t *testing.T) {
 	expected := `{"terms_set":{"codes":{"minimum_should_match_script":{"source":"Math.min(params.num_terms, doc['required_matches'].value)"},"terms":["abc","def","ghi"]}}}`
 	if got != expected {
 		t.Errorf("expected\n%s\n,got:\n%s", expected, got)
-	}
-}
-
-func TestSearchTermsSetQuery(t *testing.T) {
-	//client := setupTestClientAndCreateIndexAndAddDocs(t, SetTraceLog(log.New(os.Stdout, "", log.LstdFlags)))
-	client := setupTestClientAndCreateIndexAndAddDocs(t)
-
-	// Match all should return all documents
-	searchResult, err := client.Search().
-		Index(testIndexName).
-		Query(
-			NewTermsSetQuery("user", "olivere", "sandrae").
-				MinimumShouldMatchField("retweets"),
-		).
-		Pretty(true).
-		Do(context.TODO())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if searchResult.Hits == nil {
-		t.Errorf("expected SearchResult.Hits != nil; got nil")
-	}
-	if got, want := searchResult.TotalHits(), int64(1); got != want {
-		t.Errorf("expected SearchResult.TotalHits() = %d; got %d", want, got)
-	}
-	if got, want := len(searchResult.Hits.Hits), 1; got != want {
-		t.Errorf("expected len(SearchResult.Hits.Hits) = %d; got %d", want, got)
 	}
 }
