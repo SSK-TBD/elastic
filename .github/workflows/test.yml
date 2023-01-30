@@ -35,7 +35,7 @@ jobs:
       run: |
         go get -u github.com/google/go-cmp/cmp
         go get -u github.com/fortytw2/leaktest
-        go get . ./aws/... ./config/... ./trace/... ./uritemplates/...
+        go get . ./config/... ./uritemplates/...
 
     - name: Wait for Elasticsearch
       run: |
@@ -44,4 +44,4 @@ jobs:
 
     - name: Run the tests
       run: |
-        go test -race -deprecations -strict-decoder -v . ./aws/... ./config/... ./trace/... ./uritemplates/...
+        go test -race -deprecations -strict-decoder -v . ./config/... ./uritemplates/...

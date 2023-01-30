@@ -7,7 +7,6 @@ package elastic
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -98,9 +97,6 @@ var (
 	// didn't return in time.
 	ErrTimeout = errors.New("timeout")
 
-	// noRetries is a retrier that does not retry.
-	noRetries = NewStopRetrier()
-
 	// noDeprecationLog is a no-op for logging deprecations.
 	noDeprecationLog = func(*http.Request, *http.Response) {}
 )
@@ -140,7 +136,6 @@ type Client struct {
 	snifferTimeoutStartup     time.Duration   // time the sniffer waits for a response from nodes info API on startup
 	snifferTimeout            time.Duration   // time the sniffer waits for a response from nodes info API
 	snifferInterval           time.Duration   // interval between sniffing
-	snifferCallback           SnifferCallback // callback to modify the sniffing decision
 	snifferStop               chan bool       // notify sniffer to stop, and notify back
 	decoder                   Decoder         // used to decode data sent from Elasticsearch
 	basicAuthUsername         string          // username for HTTP Basic Auth
@@ -148,7 +143,6 @@ type Client struct {
 	sendGetBodyAs             string          // override for when sending a GET with a body
 	gzipEnabled               bool            // gzip compression enabled or disabled (default)
 	requiredPlugins           []string        // list of required plugins
-	retrier                   Retrier         // strategy for retries
 	retryStatusCodes          []int           // HTTP status codes where to retry automatically (with retrier)
 	headers                   http.Header     // a list of default headers to add to each request
 }
@@ -247,11 +241,9 @@ func NewSimpleClient(options ...ClientOptionFunc) (*Client, error) {
 		snifferTimeoutStartup:     off,
 		snifferTimeout:            off,
 		snifferInterval:           off,
-		snifferCallback:           nopSnifferCallback,
 		snifferStop:               make(chan bool),
 		sendGetBodyAs:             DefaultSendGetBodyAs,
 		gzipEnabled:               DefaultGzipEnabled,
-		retrier:                   noRetries, // no retries by default
 		retryStatusCodes:          nil,       // no automatic retries for specific HTTP status codes
 		deprecationlog:            noDeprecationLog,
 	}
@@ -290,17 +282,6 @@ func NewSimpleClient(options ...ClientOptionFunc) (*Client, error) {
 		return nil, err
 	}
 
-	// Check the required plugins
-	for _, plugin := range c.requiredPlugins {
-		found, err := c.HasPlugin(plugin)
-		if err != nil {
-			return nil, err
-		}
-		if !found {
-			return nil, fmt.Errorf("elastic: plugin %s not found", plugin)
-		}
-	}
-
 	c.mu.Lock()
 	c.running = true
 	c.mu.Unlock()
@@ -333,11 +314,9 @@ func DialContext(ctx context.Context, options ...ClientOptionFunc) (*Client, err
 		snifferTimeoutStartup:     DefaultSnifferTimeoutStartup,
 		snifferTimeout:            DefaultSnifferTimeout,
 		snifferInterval:           DefaultSnifferInterval,
-		snifferCallback:           nopSnifferCallback,
 		snifferStop:               make(chan bool),
 		sendGetBodyAs:             DefaultSendGetBodyAs,
 		gzipEnabled:               DefaultGzipEnabled,
-		retrier:                   noRetries, // no retries by default
 		retryStatusCodes:          nil,       // no automatic retries for specific HTTP status codes
 		deprecationlog:            noDeprecationLog,
 	}
@@ -374,16 +353,9 @@ func DialContext(ctx context.Context, options ...ClientOptionFunc) (*Client, err
 		}
 	}
 
-	if c.snifferEnabled {
-		// Sniff the cluster initially
-		if err := c.sniff(ctx, c.snifferTimeoutStartup); err != nil {
-			return nil, err
-		}
-	} else {
-		// Do not sniff the cluster initially. Use the provided URLs instead.
-		for _, url := range c.urls {
-			c.conns = append(c.conns, newConn(url, url))
-		}
+	
+	for _, url := range c.urls {
+		c.conns = append(c.conns, newConn(url, url))
 	}
 
 	if c.healthcheckEnabled {
@@ -395,20 +367,6 @@ func DialContext(ctx context.Context, options ...ClientOptionFunc) (*Client, err
 		return nil, err
 	}
 
-	// Check the required plugins
-	for _, plugin := range c.requiredPlugins {
-		found, err := c.HasPlugin(plugin)
-		if err != nil {
-			return nil, err
-		}
-		if !found {
-			return nil, fmt.Errorf("elastic: plugin %s not found", plugin)
-		}
-	}
-
-	if c.snifferEnabled {
-		go c.sniffer() // periodically update cluster information
-	}
 	if c.healthcheckEnabled {
 		go c.healthchecker() // start goroutine periodically ping all nodes of the cluster
 	}
@@ -567,27 +525,6 @@ func SetSnifferInterval(interval time.Duration) ClientOptionFunc {
 	}
 }
 
-// SnifferCallback defines the protocol for sniffing decisions.
-type SnifferCallback func(*NodesInfoNode) bool
-
-// nopSnifferCallback is the default sniffer callback: It accepts
-// all nodes the sniffer finds.
-var nopSnifferCallback = func(*NodesInfoNode) bool { return true }
-
-// SetSnifferCallback allows the caller to modify sniffer decisions.
-// When setting the callback, the given SnifferCallback is called for
-// each (healthy) node found during the sniffing process.
-// If the callback returns false, the node is ignored: No requests
-// are routed to it.
-func SetSnifferCallback(f SnifferCallback) ClientOptionFunc {
-	return func(c *Client) error {
-		if f != nil {
-			c.snifferCallback = f
-		}
-		return nil
-	}
-}
-
 // SetHealthcheck enables or disables healthchecks (enabled by default).
 func SetHealthcheck(enabled bool) ClientOptionFunc {
 	return func(c *Client) error {
@@ -624,30 +561,6 @@ func SetHealthcheckTimeout(timeout time.Duration) ClientOptionFunc {
 func SetHealthcheckInterval(interval time.Duration) ClientOptionFunc {
 	return func(c *Client) error {
 		c.healthcheckInterval = interval
-		return nil
-	}
-}
-
-// SetMaxRetries sets the maximum number of retries before giving up when
-// performing a HTTP request to Elasticsearch.
-//
-// Deprecated: Replace with a Retry implementation.
-func SetMaxRetries(maxRetries int) ClientOptionFunc {
-	return func(c *Client) error {
-		if maxRetries < 0 {
-			return errors.New("MaxRetries must be greater than or equal to 0")
-		} else if maxRetries == 0 {
-			c.retrier = noRetries
-		} else {
-			// Create a Retrier that will wait for 100ms (+/- jitter) between requests.
-			// This resembles the old behavior with maxRetries.
-			ticks := make([]int, maxRetries)
-			for i := 0; i < len(ticks); i++ {
-				ticks[i] = 100
-			}
-			backoff := NewSimpleBackoff(ticks...)
-			c.retrier = NewBackoffRetrier(backoff)
-		}
 		return nil
 	}
 }
@@ -721,18 +634,6 @@ func SetSendGetBodyAs(httpMethod string) ClientOptionFunc {
 	}
 }
 
-// SetRetrier specifies the retry strategy that handles errors during
-// HTTP request/response with Elasticsearch.
-func SetRetrier(retrier Retrier) ClientOptionFunc {
-	return func(c *Client) error {
-		if retrier == nil {
-			retrier = noRetries // no retries by default
-		}
-		c.retrier = retrier
-		return nil
-	}
-}
-
 // SetRetryStatusCodes specifies the HTTP status codes where the client
 // will retry automatically. Notice that retries call the specified retrier,
 // so calling SetRetryStatusCodes without setting a Retrier won't do anything
@@ -790,9 +691,6 @@ func (c *Client) Start() {
 	}
 	c.mu.RUnlock()
 
-	if c.snifferEnabled {
-		go c.sniffer()
-	}
 	if c.healthcheckEnabled {
 		go c.healthchecker()
 	}
@@ -873,146 +771,6 @@ func (c *Client) dumpResponse(resp *http.Response) {
 			c.tracef("%s\n", string(out))
 		}
 	}
-}
-
-// sniffer periodically runs sniff.
-func (c *Client) sniffer() {
-	c.mu.RLock()
-	timeout := c.snifferTimeout
-	interval := c.snifferInterval
-	c.mu.RUnlock()
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-c.snifferStop:
-			// we are asked to stop, so we signal back that we're stopping now
-			c.snifferStop <- true
-			return
-		case <-ticker.C:
-			c.sniff(context.Background(), timeout)
-		}
-	}
-}
-
-// sniff uses the Node Info API to return the list of nodes in the cluster.
-// It uses the list of URLs passed on startup plus the list of URLs found
-// by the preceding sniffing process (if sniffing is enabled).
-//
-// If sniffing is disabled, this is a no-op.
-func (c *Client) sniff(parentCtx context.Context, timeout time.Duration) error {
-	c.mu.RLock()
-	if !c.snifferEnabled {
-		c.mu.RUnlock()
-		return nil
-	}
-
-	// Use all available URLs provided to sniff the cluster.
-	var urls []string
-	urlsMap := make(map[string]bool)
-
-	// Add all URLs provided on startup
-	for _, url := range c.urls {
-		urlsMap[url] = true
-		urls = append(urls, url)
-	}
-	c.mu.RUnlock()
-
-	// Add all URLs found by sniffing
-	c.connsMu.RLock()
-	for _, conn := range c.conns {
-		if !conn.IsDead() {
-			url := conn.URL()
-			if _, found := urlsMap[url]; !found {
-				urls = append(urls, url)
-			}
-		}
-	}
-	c.connsMu.RUnlock()
-
-	if len(urls) == 0 {
-		return errors.Wrap(ErrNoClient, "no URLs found")
-	}
-
-	// Start sniffing on all found URLs
-	ch := make(chan []*conn, len(urls))
-
-	ctx, cancel := context.WithTimeout(parentCtx, timeout)
-	defer cancel()
-
-	for _, url := range urls {
-		go func(url string) { ch <- c.sniffNode(ctx, url) }(url)
-	}
-
-	// Wait for the results to come back, or the process times out.
-	for {
-		select {
-		case conns := <-ch:
-			if len(conns) > 0 {
-				c.updateConns(conns)
-				return nil
-			}
-		case <-ctx.Done():
-			if err := ctx.Err(); err != nil {
-				switch {
-				case IsContextErr(err):
-					return err
-				}
-				return errors.Wrapf(ErrNoClient, "sniff timeout: %v", err)
-			}
-			// We get here if no cluster responds in time
-			return errors.Wrap(ErrNoClient, "sniff timeout")
-		}
-	}
-}
-
-// sniffNode sniffs a single node. This method is run as a goroutine
-// in sniff. If successful, it returns the list of node URLs extracted
-// from the result of calling Nodes Info API. Otherwise, an empty array
-// is returned.
-func (c *Client) sniffNode(ctx context.Context, url string) []*conn {
-	var nodes []*conn
-
-	// Call the Nodes Info API at /_nodes/http
-	req, err := NewRequest("GET", url+"/_nodes/http")
-	if err != nil {
-		return nodes
-	}
-
-	c.mu.RLock()
-	if c.basicAuthUsername != "" || c.basicAuthPassword != "" {
-		req.SetBasicAuth(c.basicAuthUsername, c.basicAuthPassword)
-	}
-	c.mu.RUnlock()
-
-	if req.Header.Get("User-Agent") == "" {
-		req.Header.Add("User-Agent", "elastic/"+Version+" ("+runtime.GOOS+"-"+runtime.GOARCH+")")
-	}
-
-	res, err := c.c.Do((*http.Request)(req).WithContext(ctx))
-	if err != nil {
-		return nodes
-	}
-	defer res.Body.Close()
-
-	var info NodesInfoResponse
-	if err := json.NewDecoder(res.Body).Decode(&info); err == nil {
-		if len(info.Nodes) > 0 {
-			for nodeID, node := range info.Nodes {
-				if c.snifferCallback(node) {
-					if node.HTTP != nil && len(node.HTTP.PublishAddress) > 0 {
-						url := c.extractHostname(c.scheme, node.HTTP.PublishAddress)
-						if url != "" {
-							nodes = append(nodes, newConn(nodeID, url))
-						}
-					}
-				}
-			}
-		}
-	}
-	return nodes
 }
 
 // extractHostname returns the URL from the http.publish_address setting.
@@ -1293,7 +1051,6 @@ type PerformRequestOptions struct {
 	Body             interface{}
 	ContentType      string
 	IgnoreErrors     []int
-	Retrier          Retrier
 	RetryStatusCodes []int
 	Headers          http.Header
 	MaxResponseSize  int64
@@ -1313,40 +1070,18 @@ func (c *Client) PerformRequest(ctx context.Context, opt PerformRequestOptions) 
 	start := time.Now().UTC()
 
 	c.mu.RLock()
-	timeout := c.healthcheckTimeout
 	basicAuth := c.basicAuthUsername != "" || c.basicAuthPassword != ""
 	basicAuthUsername := c.basicAuthUsername
 	basicAuthPassword := c.basicAuthPassword
 	sendGetBodyAs := c.sendGetBodyAs
 	gzipEnabled := c.gzipEnabled
-	healthcheckEnabled := c.healthcheckEnabled
-	retrier := c.retrier
-	if opt.Retrier != nil {
-		retrier = opt.Retrier
-	}
-	retryStatusCodes := c.retryStatusCodes
-	if opt.RetryStatusCodes != nil {
-		retryStatusCodes = opt.RetryStatusCodes
-	}
 	defaultHeaders := c.headers
 	c.mu.RUnlock()
-
-	// retry returns true if statusCode indicates the request is to be retried
-	retry := func(statusCode int) bool {
-		for _, code := range retryStatusCodes {
-			if code == statusCode {
-				return true
-			}
-		}
-		return false
-	}
 
 	var err error
 	var conn *conn
 	var req *Request
 	var resp *Response
-	var retried bool
-	var n int
 
 	// Change method if sendGetBodyAs is specified.
 	if opt.Method == "GET" && opt.Body != nil && sendGetBodyAs != "GET" {
@@ -1361,27 +1096,6 @@ func (c *Client) PerformRequest(ctx context.Context, opt PerformRequestOptions) 
 
 		// Get a connection
 		conn, err = c.next()
-		if errors.Cause(err) == ErrNoClient {
-			n++
-			if !retried {
-				// Force a healtcheck as all connections seem to be dead.
-				c.healthcheck(ctx, timeout, false)
-				if healthcheckEnabled {
-					retried = true
-					continue
-				}
-			}
-			wait, ok, rerr := retrier.Retry(ctx, n, nil, nil, err)
-			if rerr != nil {
-				return nil, rerr
-			}
-			if !ok {
-				return nil, err
-			}
-			retried = true
-			time.Sleep(wait)
-			continue // try again
-		}
 		if err != nil {
 			c.errorf("elastic: cannot get connection from pool")
 			return nil, err
@@ -1432,38 +1146,6 @@ func (c *Client) PerformRequest(ctx context.Context, opt PerformRequestOptions) 
 			// Proceed, but don't mark the node as dead
 			return nil, err
 		}
-		if err != nil {
-			n++
-			wait, ok, rerr := retrier.Retry(ctx, n, (*http.Request)(req), res, err)
-			if rerr != nil {
-				c.errorf("elastic: %s is dead", conn.URL())
-				conn.MarkAsDead()
-				return nil, rerr
-			}
-			if !ok {
-				c.errorf("elastic: %s is dead", conn.URL())
-				conn.MarkAsDead()
-				return nil, err
-			}
-			retried = true
-			time.Sleep(wait)
-			continue // try again
-		}
-		if retry(res.StatusCode) {
-			n++
-			wait, ok, rerr := retrier.Retry(ctx, n, (*http.Request)(req), res, err)
-			if rerr != nil {
-				c.errorf("elastic: %s is dead", conn.URL())
-				conn.MarkAsDead()
-				return nil, rerr
-			}
-			if ok {
-				// retry
-				retried = true
-				time.Sleep(wait)
-				continue // try again
-			}
-		}
 
 		if !opt.Stream {
 			defer res.Body.Close()
@@ -1509,66 +1191,6 @@ func (c *Client) PerformRequest(ctx context.Context, opt PerformRequestOptions) 
 	return resp, nil
 }
 
-// -- Document APIs --
-
-// Index a document.
-func (c *Client) Index() *IndexService {
-	return NewIndexService(c)
-}
-
-// Get a document.
-func (c *Client) Get() *GetService {
-	return NewGetService(c)
-}
-
-// MultiGet retrieves multiple documents in one roundtrip.
-func (c *Client) MultiGet() *MgetService {
-	return NewMgetService(c)
-}
-
-// Mget retrieves multiple documents in one roundtrip.
-func (c *Client) Mget() *MgetService {
-	return NewMgetService(c)
-}
-
-// Delete a document.
-func (c *Client) Delete() *DeleteService {
-	return NewDeleteService(c)
-}
-
-// DeleteByQuery deletes documents as found by a query.
-func (c *Client) DeleteByQuery(indices ...string) *DeleteByQueryService {
-	return NewDeleteByQueryService(c).Index(indices...)
-}
-
-// Update a document.
-func (c *Client) Update() *UpdateService {
-	return NewUpdateService(c)
-}
-
-// UpdateByQuery performs an update on a set of documents.
-func (c *Client) UpdateByQuery(indices ...string) *UpdateByQueryService {
-	return NewUpdateByQueryService(c).Index(indices...)
-}
-
-// Bulk is the entry point to mass insert/update/delete documents.
-func (c *Client) Bulk() *BulkService {
-	return NewBulkService(c)
-}
-
-// BulkProcessor allows setting up a concurrent processor of bulk requests.
-func (c *Client) BulkProcessor() *BulkProcessorService {
-	return NewBulkProcessorService(c)
-}
-
-// Reindex copies data from a source index into a destination index.
-//
-// See https://www.elastic.co/guide/en/elasticsearch/reference/7.0/docs-reindex.html
-// for details on the Reindex API.
-func (c *Client) Reindex() *ReindexService {
-	return NewReindexService(c)
-}
-
 // TermVectors returns information and statistics on terms in the fields
 // of a particular document.
 func (c *Client) TermVectors(index string) *TermvectorsService {
@@ -1595,16 +1217,6 @@ func (c *Client) MultiSearch() *MultiSearchService {
 	return NewMultiSearchService(c)
 }
 
-// Count documents.
-func (c *Client) Count(indices ...string) *CountService {
-	return NewCountService(c).Index(indices...)
-}
-
-// Explain computes a score explanation for a query and a specific document.
-func (c *Client) Explain(index, typ, id string) *ExplainService {
-	return NewExplainService(c).Index(index).Type(typ).Id(id)
-}
-
 // TODO Search Template
 // TODO Search Exists API
 
@@ -1618,25 +1230,10 @@ func (c *Client) SearchShards(indices ...string) *SearchShardsService {
 	return NewSearchShardsService(c).Index(indices...)
 }
 
-// FieldCaps returns statistical information about fields in indices.
-func (c *Client) FieldCaps(indices ...string) *FieldCapsService {
-	return NewFieldCapsService(c).Index(indices...)
-}
-
-// Exists checks if a document exists.
-func (c *Client) Exists() *ExistsService {
-	return NewExistsService(c)
-}
-
 // Scroll through documents. Use this to efficiently scroll through results
 // while returning the results to a client.
 func (c *Client) Scroll(indices ...string) *ScrollService {
 	return NewScrollService(c).Index(indices...)
-}
-
-// ClearScroll can be used to clear search contexts manually.
-func (c *Client) ClearScroll(scrollIds ...string) *ClearScrollService {
-	return NewClearScrollService(c).ScrollId(scrollIds...)
 }
 
 // OpenPointInTime opens a new Point in Time.
@@ -1647,437 +1244,6 @@ func (c *Client) OpenPointInTime(indices ...string) *OpenPointInTimeService {
 // ClosePointInTime closes an existing Point in Time.
 func (c *Client) ClosePointInTime(id string) *ClosePointInTimeService {
 	return NewClosePointInTimeService(c).ID(id)
-}
-
-// -- Indices APIs --
-
-// CreateIndex returns a service to create a new index.
-func (c *Client) CreateIndex(name string) *IndicesCreateService {
-	return NewIndicesCreateService(c).Index(name)
-}
-
-// DeleteIndex returns a service to delete an index.
-func (c *Client) DeleteIndex(indices ...string) *IndicesDeleteService {
-	return NewIndicesDeleteService(c).Index(indices)
-}
-
-// IndexExists allows to check if an index exists.
-func (c *Client) IndexExists(indices ...string) *IndicesExistsService {
-	return NewIndicesExistsService(c).Index(indices)
-}
-
-// ShrinkIndex returns a service to shrink one index into another.
-func (c *Client) ShrinkIndex(source, target string) *IndicesShrinkService {
-	return NewIndicesShrinkService(c).Source(source).Target(target)
-}
-
-// RolloverIndex rolls an alias over to a new index when the existing index
-// is considered to be too large or too old.
-func (c *Client) RolloverIndex(alias string) *IndicesRolloverService {
-	return NewIndicesRolloverService(c).Alias(alias)
-}
-
-// IndexStats provides statistics on different operations happining
-// in one or more indices.
-func (c *Client) IndexStats(indices ...string) *IndicesStatsService {
-	return NewIndicesStatsService(c).Index(indices...)
-}
-
-// OpenIndex opens an index.
-func (c *Client) OpenIndex(name string) *IndicesOpenService {
-	return NewIndicesOpenService(c).Index(name)
-}
-
-// CloseIndex closes an index.
-func (c *Client) CloseIndex(name string) *IndicesCloseService {
-	return NewIndicesCloseService(c).Index(name)
-}
-
-// FreezeIndex freezes an index.
-//
-// Deprecated: Frozen indices are deprecated because they provide no benefit
-// given improvements in heap memory utilization.
-func (c *Client) FreezeIndex(name string) *IndicesFreezeService {
-	return NewIndicesFreezeService(c).Index(name)
-}
-
-// UnfreezeIndex unfreezes an index.
-//
-// Deprecated: Frozen indices are deprecated because they provide no benefit
-// given improvements in heap memory utilization.
-func (c *Client) UnfreezeIndex(name string) *IndicesUnfreezeService {
-	return NewIndicesUnfreezeService(c).Index(name)
-}
-
-// IndexGet retrieves information about one or more indices.
-// IndexGet is only available for Elasticsearch 1.4 or later.
-func (c *Client) IndexGet(indices ...string) *IndicesGetService {
-	return NewIndicesGetService(c).Index(indices...)
-}
-
-// IndexGetSettings retrieves settings of all, one or more indices.
-func (c *Client) IndexGetSettings(indices ...string) *IndicesGetSettingsService {
-	return NewIndicesGetSettingsService(c).Index(indices...)
-}
-
-// IndexPutSettings sets settings for all, one or more indices.
-func (c *Client) IndexPutSettings(indices ...string) *IndicesPutSettingsService {
-	return NewIndicesPutSettingsService(c).Index(indices...)
-}
-
-// IndexSegments retrieves low level segment information for all, one or more indices.
-func (c *Client) IndexSegments(indices ...string) *IndicesSegmentsService {
-	return NewIndicesSegmentsService(c).Index(indices...)
-}
-
-// IndexAnalyze performs the analysis process on a text and returns the
-// token breakdown of the text.
-func (c *Client) IndexAnalyze() *IndicesAnalyzeService {
-	return NewIndicesAnalyzeService(c)
-}
-
-// Forcemerge optimizes one or more indices.
-// It replaces the deprecated Optimize API.
-func (c *Client) Forcemerge(indices ...string) *IndicesForcemergeService {
-	return NewIndicesForcemergeService(c).Index(indices...)
-}
-
-// Refresh asks Elasticsearch to refresh one or more indices.
-func (c *Client) Refresh(indices ...string) *RefreshService {
-	return NewRefreshService(c).Index(indices...)
-}
-
-// Flush asks Elasticsearch to free memory from the index and
-// flush data to disk.
-func (c *Client) Flush(indices ...string) *IndicesFlushService {
-	return NewIndicesFlushService(c).Index(indices...)
-}
-
-// SyncedFlush performs a synced flush.
-//
-// See https://www.elastic.co/guide/en/elasticsearch/reference/7.0/indices-synced-flush.html
-// for more details on synched flushes and how they differ from a normal
-// Flush.
-func (c *Client) SyncedFlush(indices ...string) *IndicesSyncedFlushService {
-	return NewIndicesSyncedFlushService(c).Index(indices...)
-}
-
-// ClearCache clears caches for one or more indices.
-func (c *Client) ClearCache(indices ...string) *IndicesClearCacheService {
-	return NewIndicesClearCacheService(c).Index(indices...)
-}
-
-// Alias enables the caller to add and/or remove aliases.
-func (c *Client) Alias() *AliasService {
-	return NewAliasService(c)
-}
-
-// Aliases returns aliases by index name(s).
-func (c *Client) Aliases() *AliasesService {
-	return NewAliasesService(c)
-}
-
-// -- Legacy templates --
-
-// IndexGetTemplate gets an index template (v1/legacy version before 7.8).
-//
-// This service implements the legacy version of index templates as described
-// in https://www.elastic.co/guide/en/elasticsearch/reference/7.9/indices-templates-v1.html.
-//
-// See e.g. IndexPutIndexTemplate and IndexPutComponentTemplate for the new version(s).
-//
-// Deprecated: Legacy index templates are deprecated in favor of composable templates.
-func (c *Client) IndexGetTemplate(names ...string) *IndicesGetTemplateService {
-	return NewIndicesGetTemplateService(c).Name(names...)
-}
-
-// IndexTemplateExists gets check if an index template exists (v1/legacy version before 7.8).
-//
-// This service implements the legacy version of index templates as described
-// in https://www.elastic.co/guide/en/elasticsearch/reference/7.9/indices-templates-v1.html.
-//
-// See e.g. IndexPutIndexTemplate and IndexPutComponentTemplate for the new version(s).
-//
-// Deprecated: Legacy index templates are deprecated in favor of composable templates.
-func (c *Client) IndexTemplateExists(name string) *IndicesExistsTemplateService {
-	return NewIndicesExistsTemplateService(c).Name(name)
-}
-
-// IndexPutTemplate creates or updates an index template (v1/legacy version before 7.8).
-//
-// This service implements the legacy version of index templates as described
-// in https://www.elastic.co/guide/en/elasticsearch/reference/7.9/indices-templates-v1.html.
-//
-// See e.g. IndexPutIndexTemplate and IndexPutComponentTemplate for the new version(s).
-//
-// Deprecated: Legacy index templates are deprecated in favor of composable templates.
-func (c *Client) IndexPutTemplate(name string) *IndicesPutTemplateService {
-	return NewIndicesPutTemplateService(c).Name(name)
-}
-
-// IndexDeleteTemplate deletes an index template (v1/legacy version before 7.8).
-//
-// This service implements the legacy version of index templates as described
-// in https://www.elastic.co/guide/en/elasticsearch/reference/7.9/indices-templates-v1.html.
-//
-// See e.g. IndexPutIndexTemplate and IndexPutComponentTemplate for the new version(s).
-//
-// Deprecated: Legacy index templates are deprecated in favor of composable templates.
-func (c *Client) IndexDeleteTemplate(name string) *IndicesDeleteTemplateService {
-	return NewIndicesDeleteTemplateService(c).Name(name)
-}
-
-// -- Index templates --
-
-// IndexPutIndexTemplate creates or updates an index template (new version after 7.8).
-//
-// This service implements the new version of index templates as described
-// on https://www.elastic.co/guide/en/elasticsearch/reference/7.9/indices-put-template.html.
-//
-// See e.g. IndexPutTemplate for the v1/legacy version.
-func (c *Client) IndexPutIndexTemplate(name string) *IndicesPutIndexTemplateService {
-	return NewIndicesPutIndexTemplateService(c).Name(name)
-}
-
-// IndexGetIndexTemplate returns an index template (new version after 7.8).
-//
-// This service implements the new version of index templates as described
-// on https://www.elastic.co/guide/en/elasticsearch/reference/7.9/indices-get-template.html.
-//
-// See e.g. IndexPutTemplate for the v1/legacy version.
-func (c *Client) IndexGetIndexTemplate(name string) *IndicesGetIndexTemplateService {
-	return NewIndicesGetIndexTemplateService(c).Name(name)
-}
-
-// IndexDeleteIndexTemplate deletes an index template (new version after 7.8).
-//
-// This service implements the new version of index templates as described
-// on https://www.elastic.co/guide/en/elasticsearch/reference/7.9/indices-delete-template.html.
-//
-// See e.g. IndexPutTemplate for the v1/legacy version.
-func (c *Client) IndexDeleteIndexTemplate(name string) *IndicesDeleteIndexTemplateService {
-	return NewIndicesDeleteIndexTemplateService(c).Name(name)
-}
-
-// -- Component templates --
-
-// IndexPutComponentTemplate creates or updates a component template (available since 7.8).
-//
-// This service implements the component templates as described
-// on https://www.elastic.co/guide/en/elasticsearch/reference/7.10/indices-component-template.html.
-func (c *Client) IndexPutComponentTemplate(name string) *IndicesPutComponentTemplateService {
-	return NewIndicesPutComponentTemplateService(c).Name(name)
-}
-
-// IndexGetComponentTemplate returns a component template (available since 7.8).
-//
-// This service implements the component templates as described
-// on https://www.elastic.co/guide/en/elasticsearch/reference/7.10/getting-component-templates.html.
-func (c *Client) IndexGetComponentTemplate(name string) *IndicesGetComponentTemplateService {
-	return NewIndicesGetComponentTemplateService(c).Name(name)
-}
-
-// IndexDeleteComponentTemplate deletes a component template (available since 7.8).
-//
-// This service implements the component templates as described
-// on https://www.elastic.co/guide/en/elasticsearch/reference/7.10/indices-delete-component-template.html.
-func (c *Client) IndexDeleteComponentTemplate(name string) *IndicesDeleteComponentTemplateService {
-	return NewIndicesDeleteComponentTemplateService(c).Name(name)
-}
-
-// GetMapping gets a mapping.
-func (c *Client) GetMapping() *IndicesGetMappingService {
-	return NewIndicesGetMappingService(c)
-}
-
-// PutMapping registers a mapping.
-func (c *Client) PutMapping() *IndicesPutMappingService {
-	return NewIndicesPutMappingService(c)
-}
-
-// GetFieldMapping gets mapping for fields.
-func (c *Client) GetFieldMapping() *IndicesGetFieldMappingService {
-	return NewIndicesGetFieldMappingService(c)
-}
-
-// -- cat APIs --
-
-// TODO cat nodes
-// TODO cat pending tasks
-// TODO cat plugins
-// TODO cat recovery
-// TODO cat thread pool
-// TODO cat shards
-// TODO cat segments
-
-// CatMaster returns information about the master node
-func (c *Client) CatMaster() *CatMasterService {
-	return NewCatMasterService(c)
-}
-
-// CatFielddata returns information about the amount of heap memory currently used by the field data cache.
-func (c *Client) CatFielddata() *CatFielddataService {
-	return NewCatFielddataService(c)
-}
-
-// CatAliases returns information about aliases.
-func (c *Client) CatAliases() *CatAliasesService {
-	return NewCatAliasesService(c)
-}
-
-// CatAllocation returns information about the allocation across nodes.
-func (c *Client) CatAllocation() *CatAllocationService {
-	return NewCatAllocationService(c)
-}
-
-// CatCount returns document counts for indices.
-func (c *Client) CatCount() *CatCountService {
-	return NewCatCountService(c)
-}
-
-// CatHealth returns information about cluster health.
-func (c *Client) CatHealth() *CatHealthService {
-	return NewCatHealthService(c)
-}
-
-// CatIndices returns information about indices.
-func (c *Client) CatIndices() *CatIndicesService {
-	return NewCatIndicesService(c)
-}
-
-// CatShards returns information about shards.
-func (c *Client) CatShards() *CatShardsService {
-	return NewCatShardsService(c)
-}
-
-// CatSnapshots returns information about snapshots.
-func (c *Client) CatSnapshots() *CatSnapshotsService {
-	return NewCatSnapshotsService(c)
-}
-
-// -- Ingest APIs --
-
-// IngestPutPipeline adds pipelines and updates existing pipelines in
-// the cluster.
-func (c *Client) IngestPutPipeline(id string) *IngestPutPipelineService {
-	return NewIngestPutPipelineService(c).Id(id)
-}
-
-// IngestGetPipeline returns pipelines based on ID.
-func (c *Client) IngestGetPipeline(ids ...string) *IngestGetPipelineService {
-	return NewIngestGetPipelineService(c).Id(ids...)
-}
-
-// IngestDeletePipeline deletes a pipeline by ID.
-func (c *Client) IngestDeletePipeline(id string) *IngestDeletePipelineService {
-	return NewIngestDeletePipelineService(c).Id(id)
-}
-
-// IngestSimulatePipeline executes a specific pipeline against the set of
-// documents provided in the body of the request.
-func (c *Client) IngestSimulatePipeline() *IngestSimulatePipelineService {
-	return NewIngestSimulatePipelineService(c)
-}
-
-// -- Cluster APIs --
-
-// ClusterHealth retrieves the health of the cluster.
-func (c *Client) ClusterHealth() *ClusterHealthService {
-	return NewClusterHealthService(c)
-}
-
-// ClusterReroute allows for manual changes to the allocation of
-// individual shards in the cluster.
-func (c *Client) ClusterReroute() *ClusterRerouteService {
-	return NewClusterRerouteService(c)
-}
-
-// ClusterState retrieves the state of the cluster.
-func (c *Client) ClusterState() *ClusterStateService {
-	return NewClusterStateService(c)
-}
-
-// ClusterStats retrieves cluster statistics.
-func (c *Client) ClusterStats() *ClusterStatsService {
-	return NewClusterStatsService(c)
-}
-
-// NodesInfo retrieves one or more or all of the cluster nodes information.
-func (c *Client) NodesInfo() *NodesInfoService {
-	return NewNodesInfoService(c)
-}
-
-// NodesStats retrieves one or more or all of the cluster nodes statistics.
-func (c *Client) NodesStats() *NodesStatsService {
-	return NewNodesStatsService(c)
-}
-
-// TasksCancel cancels tasks running on the specified nodes.
-func (c *Client) TasksCancel() *TasksCancelService {
-	return NewTasksCancelService(c)
-}
-
-// TasksList retrieves the list of tasks running on the specified nodes.
-func (c *Client) TasksList() *TasksListService {
-	return NewTasksListService(c)
-}
-
-// TasksGetTask retrieves a task running on the cluster.
-func (c *Client) TasksGetTask() *TasksGetTaskService {
-	return NewTasksGetTaskService(c)
-}
-
-// TODO Pending cluster tasks
-// TODO Cluster Reroute
-// TODO Cluster Update Settings
-// TODO Nodes Stats
-// TODO Nodes hot_threads
-
-// -- Snapshot and Restore --
-
-// SnapshotStatus returns information about the status of a snapshot.
-func (c *Client) SnapshotStatus() *SnapshotStatusService {
-	return NewSnapshotStatusService(c)
-}
-
-// SnapshotCreate creates a snapshot.
-func (c *Client) SnapshotCreate(repository string, snapshot string) *SnapshotCreateService {
-	return NewSnapshotCreateService(c).Repository(repository).Snapshot(snapshot)
-}
-
-// SnapshotCreateRepository creates or updates a snapshot repository.
-func (c *Client) SnapshotCreateRepository(repository string) *SnapshotCreateRepositoryService {
-	return NewSnapshotCreateRepositoryService(c).Repository(repository)
-}
-
-// SnapshotDelete deletes a snapshot in a snapshot repository.
-func (c *Client) SnapshotDelete(repository string, snapshot string) *SnapshotDeleteService {
-	return NewSnapshotDeleteService(c).Repository(repository).Snapshot(snapshot)
-}
-
-// SnapshotDeleteRepository deletes a snapshot repository.
-func (c *Client) SnapshotDeleteRepository(repositories ...string) *SnapshotDeleteRepositoryService {
-	return NewSnapshotDeleteRepositoryService(c).Repository(repositories...)
-}
-
-// SnapshotGetRepository gets a snapshot repository.
-func (c *Client) SnapshotGetRepository(repositories ...string) *SnapshotGetRepositoryService {
-	return NewSnapshotGetRepositoryService(c).Repository(repositories...)
-}
-
-// SnapshotGet lists snapshot for a repository.
-func (c *Client) SnapshotGet(repository string) *SnapshotGetService {
-	return NewSnapshotGetService(c).Repository(repository)
-}
-
-// SnapshotVerifyRepository verifies a snapshot repository.
-func (c *Client) SnapshotVerifyRepository(repository string) *SnapshotVerifyRepositoryService {
-	return NewSnapshotVerifyRepositoryService(c).Repository(repository)
-}
-
-// SnapshotRestore restores the specified indices from a given snapshot
-func (c *Client) SnapshotRestore(repository string, snapshot string) *SnapshotRestoreService {
-	return NewSnapshotRestoreService(c).Repository(repository).Snapshot(snapshot)
 }
 
 // -- Scripting APIs --
@@ -2096,253 +1262,4 @@ func (c *Client) PutScript() *PutScriptService {
 // DeleteScript allows removing a stored script from Elasticsearch.
 func (c *Client) DeleteScript() *DeleteScriptService {
 	return NewDeleteScriptService(c)
-}
-
-// -- X-Pack General --
-
-// XPackInfo gets information on the xpack plugins enabled on the cluster
-
-func (c *Client) XPackInfo() *XPackInfoService {
-	return NewXPackInfoService(c)
-}
-
-// -- X-Pack Async Search --
-
-// XPackAsyncSearchSubmit starts an asynchronous search.
-func (c *Client) XPackAsyncSearchSubmit() *XPackAsyncSearchSubmit {
-	return NewXPackAsyncSearchSubmit(c)
-}
-
-// XPackAsyncSearchGet retrieves the outcome of an asynchronous search.
-func (c *Client) XPackAsyncSearchGet() *XPackAsyncSearchGet {
-	return NewXPackAsyncSearchGet(c)
-}
-
-// XPackAsyncSearchDelete deletes an asynchronous search.
-func (c *Client) XPackAsyncSearchDelete() *XPackAsyncSearchDelete {
-	return NewXPackAsyncSearchDelete(c)
-}
-
-// -- X-Pack Index Lifecycle Management --
-
-// XPackIlmPutLifecycle adds or modifies an ilm policy.
-func (c *Client) XPackIlmPutLifecycle() *XPackIlmPutLifecycleService {
-	return NewXPackIlmPutLifecycleService(c)
-}
-
-// XPackIlmGettLifecycle gets an ilm policy.
-func (c *Client) XPackIlmGetLifecycle() *XPackIlmGetLifecycleService {
-	return NewXPackIlmGetLifecycleService(c)
-}
-
-// XPackIlmDeleteLifecycle deletes an ilm policy.
-func (c *Client) XPackIlmDeleteLifecycle() *XPackIlmDeleteLifecycleService {
-	return NewXPackIlmDeleteLifecycleService(c)
-}
-
-// -- X-Pack Security --
-
-// XPackSecurityGetRoleMapping gets a role mapping.
-func (c *Client) XPackSecurityGetRoleMapping(roleMappingName string) *XPackSecurityGetRoleMappingService {
-	return NewXPackSecurityGetRoleMappingService(c).Name(roleMappingName)
-}
-
-// XPackSecurityPutRoleMapping adds a role mapping.
-func (c *Client) XPackSecurityPutRoleMapping(roleMappingName string) *XPackSecurityPutRoleMappingService {
-	return NewXPackSecurityPutRoleMappingService(c).Name(roleMappingName)
-}
-
-// XPackSecurityDeleteRoleMapping deletes a role mapping.
-func (c *Client) XPackSecurityDeleteRoleMapping(roleMappingName string) *XPackSecurityDeleteRoleMappingService {
-	return NewXPackSecurityDeleteRoleMappingService(c).Name(roleMappingName)
-}
-
-// XPackSecurityGetRole gets a role.
-func (c *Client) XPackSecurityGetRole(roleName string) *XPackSecurityGetRoleService {
-	return NewXPackSecurityGetRoleService(c).Name(roleName)
-}
-
-// XPackSecurityPutRole adds a role.
-func (c *Client) XPackSecurityPutRole(roleName string) *XPackSecurityPutRoleService {
-	return NewXPackSecurityPutRoleService(c).Name(roleName)
-}
-
-// XPackSecurityDeleteRole deletes a role.
-func (c *Client) XPackSecurityDeleteRole(roleName string) *XPackSecurityDeleteRoleService {
-	return NewXPackSecurityDeleteRoleService(c).Name(roleName)
-}
-
-// TODO: Clear role cache API
-// https://www.elastic.co/guide/en/elasticsearch/reference/7.0/security-api-clear-role-cache.html
-
-// XPackSecurityChangePassword changes the password of users in the native realm.
-func (c *Client) XPackSecurityChangePassword(username string) *XPackSecurityChangePasswordService {
-	return NewXPackSecurityChangePasswordService(c).Username(username)
-}
-
-// XPackSecurityGetUser gets details about one or more users.
-func (c *Client) XPackSecurityGetUser(usernames ...string) *XPackSecurityGetUserService {
-	return NewXPackSecurityGetUserService(c).Usernames(usernames...)
-}
-
-// XPackSecurityPutUser adds or updates a user.
-func (c *Client) XPackSecurityPutUser(username string) *XPackSecurityPutUserService {
-	return NewXPackSecurityPutUserService(c).Username(username)
-}
-
-// XPackSecurityEnableUser enables a user.
-func (c *Client) XPackSecurityEnableUser(username string) *XPackSecurityEnableUserService {
-	return NewXPackSecurityEnableUserService(c).Username(username)
-}
-
-// XPackSecurityDisableUser disables a user.
-func (c *Client) XPackSecurityDisableUser(username string) *XPackSecurityDisableUserService {
-	return NewXPackSecurityDisableUserService(c).Username(username)
-}
-
-// XPackSecurityDeleteUser deletes a user.
-func (c *Client) XPackSecurityDeleteUser(username string) *XPackSecurityDeleteUserService {
-	return NewXPackSecurityDeleteUserService(c).Username(username)
-}
-
-// -- X-Pack Rollup --
-
-// XPackRollupPut creates or updates a rollup job.
-func (c *Client) XPackRollupPut(jobId string) *XPackRollupPutService {
-	return NewXPackRollupPutService(c).JobId(jobId)
-}
-
-// XPackRollupGet gets a rollup job.
-func (c *Client) XPackRollupGet(jobId string) *XPackRollupGetService {
-	return NewXPackRollupGetService(c).JobId(jobId)
-}
-
-// XPackRollupDelete deletes a rollup job.
-func (c *Client) XPackRollupDelete(jobId string) *XPackRollupDeleteService {
-	return NewXPackRollupDeleteService(c).JobId(jobId)
-}
-
-// XPackRollupStart starts a rollup job.
-func (c *Client) XPackRollupStart(jobId string) *XPackRollupStartService {
-	return NewXPackRollupStartService(c).JobId(jobId)
-}
-
-// XPackRollupStop stops a rollup job.
-func (c *Client) XPackRollupStop(jobId string) *XPackRollupStopService {
-	return NewXPackRollupStopService(c).JobId(jobId)
-}
-
-// -- X-Pack Watcher --
-
-// XPackWatchPut adds a watch.
-func (c *Client) XPackWatchPut(watchId string) *XPackWatcherPutWatchService {
-	return NewXPackWatcherPutWatchService(c).Id(watchId)
-}
-
-// XPackWatchGet gets a watch.
-func (c *Client) XPackWatchGet(watchId string) *XPackWatcherGetWatchService {
-	return NewXPackWatcherGetWatchService(c).Id(watchId)
-}
-
-// XPackWatchDelete deletes a watch.
-func (c *Client) XPackWatchDelete(watchId string) *XPackWatcherDeleteWatchService {
-	return NewXPackWatcherDeleteWatchService(c).Id(watchId)
-}
-
-// XPackWatchExecute executes a watch.
-func (c *Client) XPackWatchExecute() *XPackWatcherExecuteWatchService {
-	return NewXPackWatcherExecuteWatchService(c)
-}
-
-// XPackWatchAck acknowledging a watch.
-func (c *Client) XPackWatchAck(watchId string) *XPackWatcherAckWatchService {
-	return NewXPackWatcherAckWatchService(c).WatchId(watchId)
-}
-
-// XPackWatchActivate activates a watch.
-func (c *Client) XPackWatchActivate(watchId string) *XPackWatcherActivateWatchService {
-	return NewXPackWatcherActivateWatchService(c).WatchId(watchId)
-}
-
-// XPackWatchDeactivate deactivates a watch.
-func (c *Client) XPackWatchDeactivate(watchId string) *XPackWatcherDeactivateWatchService {
-	return NewXPackWatcherDeactivateWatchService(c).WatchId(watchId)
-}
-
-// XPackWatchStats returns the current Watcher metrics.
-func (c *Client) XPackWatchStats() *XPackWatcherStatsService {
-	return NewXPackWatcherStatsService(c)
-}
-
-// XPackWatchStart starts a watch.
-func (c *Client) XPackWatchStart() *XPackWatcherStartService {
-	return NewXPackWatcherStartService(c)
-}
-
-// XPackWatchStop stops a watch.
-func (c *Client) XPackWatchStop() *XPackWatcherStopService {
-	return NewXPackWatcherStopService(c)
-}
-
-// -- Helpers and shortcuts --
-
-// ElasticsearchVersion returns the version number of Elasticsearch
-// running on the given URL.
-func (c *Client) ElasticsearchVersion(url string) (string, error) {
-	res, _, err := c.Ping(url).Do(context.Background())
-	if err != nil {
-		return "", err
-	}
-	return res.Version.Number, nil
-}
-
-// IndexNames returns the names of all indices in the cluster.
-func (c *Client) IndexNames() ([]string, error) {
-	res, err := c.IndexGetSettings().Index("_all").Do(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	var names []string
-	for name := range res {
-		names = append(names, name)
-	}
-	return names, nil
-}
-
-// Ping checks if a given node in a cluster exists and (optionally)
-// returns some basic information about the Elasticsearch server,
-// e.g. the Elasticsearch version number.
-//
-// Notice that you need to specify a URL here explicitly.
-func (c *Client) Ping(url string) *PingService {
-	return NewPingService(c).URL(url)
-}
-
-// WaitForStatus waits for the cluster to have the given status.
-// This is a shortcut method for the ClusterHealth service.
-//
-// WaitForStatus waits for the specified timeout, e.g. "10s".
-// If the cluster will have the given state within the timeout, nil is returned.
-// If the request timed out, ErrTimeout is returned.
-func (c *Client) WaitForStatus(status string, timeout string) error {
-	health, err := c.ClusterHealth().WaitForStatus(status).Timeout(timeout).Do(context.Background())
-	if err != nil {
-		return err
-	}
-	if health.TimedOut {
-		return ErrTimeout
-	}
-	return nil
-}
-
-// WaitForGreenStatus waits for the cluster to have the "green" status.
-// See WaitForStatus for more details.
-func (c *Client) WaitForGreenStatus(timeout string) error {
-	return c.WaitForStatus("green", timeout)
-}
-
-// WaitForYellowStatus waits for the cluster to have the "yellow" status.
-// See WaitForStatus for more details.
-func (c *Client) WaitForYellowStatus(timeout string) error {
-	return c.WaitForStatus("yellow", timeout)
 }

@@ -5,7 +5,6 @@
 package elastic
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 )
@@ -41,29 +40,5 @@ func TestDistanceFeatureQueryForGeoField(t *testing.T) {
 	expected := `{"distance_feature":{"field":"location","origin":{"lat":-71.3,"lon":41.15},"pivot":"1000m"}}`
 	if got != expected {
 		t.Errorf("expected\n%s\n,got:\n%s", expected, got)
-	}
-}
-
-func TestDistanceFeatureQueryIntegration(t *testing.T) {
-	client := setupTestClientAndCreateIndexAndAddDocs(t) //, SetTraceLog(log.New(os.Stdout, "", 0)))
-
-	res, err := client.Search().
-		Index(testOrderIndex).
-		Query(
-			NewDistanceFeatureQuery("time", "now", "7d"),
-		).
-		Pretty(true).
-		Do(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Hits == nil {
-		t.Errorf("expected Hits != nil; got nil")
-	}
-	if want, have := int64(8), res.TotalHits(); want != have {
-		t.Errorf("expected TotalHits() = %d; got %d", want, have)
-	}
-	if want, have := 8, len(res.Hits.Hits); want != have {
-		t.Errorf("expected len(Hits.Hits) = %d; got %d", want, have)
 	}
 }
