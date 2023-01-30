@@ -11,9 +11,9 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-
-	"github.com/pkg/errors"
 )
+
+var nilByte = []byte("null")
 
 // checkResponse will return an error if the request/response indicates
 // an error returned from Elasticsearch.
@@ -135,69 +135,6 @@ func IsContextErr(err error) bool {
 		}
 		// Use of an AWS Signing Transport can result in a wrapped url.Error
 		return IsContextErr(ue.Err)
-	}
-	return false
-}
-
-// IsConnErr returns true if the error indicates that Elastic could not
-// find an Elasticsearch host to connect to.
-func IsConnErr(err error) bool {
-	return err == ErrNoClient || errors.Cause(err) == ErrNoClient
-}
-
-// IsNotFound returns true if the given error indicates that Elasticsearch
-// returned HTTP status 404. The err parameter can be of type *elastic.Error,
-// elastic.Error, *http.Response or int (indicating the HTTP status code).
-func IsNotFound(err interface{}) bool {
-	return IsStatusCode(err, http.StatusNotFound)
-}
-
-// IsTimeout returns true if the given error indicates that Elasticsearch
-// returned HTTP status 408. The err parameter can be of type *elastic.Error,
-// elastic.Error, *http.Response or int (indicating the HTTP status code).
-func IsTimeout(err interface{}) bool {
-	return IsStatusCode(err, http.StatusRequestTimeout)
-}
-
-// IsConflict returns true if the given error indicates that the Elasticsearch
-// operation resulted in a version conflict. This can occur in operations like
-// `update` or `index` with `op_type=create`. The err parameter can be of
-// type *elastic.Error, elastic.Error, *http.Response or int (indicating the
-// HTTP status code).
-func IsConflict(err interface{}) bool {
-	return IsStatusCode(err, http.StatusConflict)
-}
-
-// IsUnauthorized returns true if the given error indicates that
-// Elasticsearch returned HTTP status 401. This happens e.g. when the
-// cluster is configured to require HTTP Basic Auth.
-// The err parameter can be of type *elastic.Error, elastic.Error,
-// *http.Response or int (indicating the HTTP status code).
-func IsUnauthorized(err interface{}) bool {
-	return IsStatusCode(err, http.StatusUnauthorized)
-}
-
-// IsForbidden returns true if the given error indicates that Elasticsearch
-// returned HTTP status 403. This happens e.g. due to a missing license.
-// The err parameter can be of type *elastic.Error, elastic.Error,
-// *http.Response or int (indicating the HTTP status code).
-func IsForbidden(err interface{}) bool {
-	return IsStatusCode(err, http.StatusForbidden)
-}
-
-// IsStatusCode returns true if the given error indicates that the Elasticsearch
-// operation returned the specified HTTP status code. The err parameter can be of
-// type *http.Response, *Error, Error, or int (indicating the HTTP status code).
-func IsStatusCode(err interface{}, code int) bool {
-	switch e := err.(type) {
-	case *http.Response:
-		return e.StatusCode == code
-	case *Error:
-		return e.Status == code
-	case Error:
-		return e.Status == code
-	case int:
-		return e == code
 	}
 	return false
 }

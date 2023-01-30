@@ -5,7 +5,6 @@
 package elastic
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,8 +17,6 @@ import (
 
 // Search for documents in Elasticsearch.
 type SearchService struct {
-	client *Client
-
 	pretty     *bool       // pretty format the returned JSON response
 	human      *bool       // return human readable values for statistics
 	errorTrace *bool       // include the stack trace of returned errors
@@ -50,15 +47,6 @@ type SearchService struct {
 
 	ccsMinimizeRoundtrips *bool // ccs_minimize_roundtrips
 
-}
-
-// NewSearchService creates a new service for searching in Elasticsearch.
-func NewSearchService(client *Client) *SearchService {
-	builder := &SearchService{
-		client:       client,
-		searchSource: NewSearchSource(),
-	}
-	return builder
 }
 
 // Pretty tells Elasticsearch whether to return a formatted JSON response.
@@ -611,52 +599,6 @@ func (s *SearchService) buildURL() (string, url.Values, error) {
 // Validate checks if the operation is valid.
 func (s *SearchService) Validate() error {
 	return nil
-}
-
-// Do executes the search and returns a SearchResult.
-func (s *SearchService) Do(ctx context.Context) (*SearchResult, error) {
-	// Check pre-conditions
-	if err := s.Validate(); err != nil {
-		return nil, err
-	}
-
-	// Get URL for request
-	path, params, err := s.buildURL()
-	if err != nil {
-		return nil, err
-	}
-
-	// Perform request
-	var body interface{}
-	if s.source != nil {
-		body = s.source
-	} else {
-		src, err := s.searchSource.Source()
-		if err != nil {
-			return nil, err
-		}
-		body = src
-	}
-	res, err := s.client.PerformRequest(ctx, PerformRequestOptions{
-		Method:          "POST",
-		Path:            path,
-		Params:          params,
-		Body:            body,
-		Headers:         s.headers,
-		MaxResponseSize: s.maxResponseSize,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Return search results
-	ret := new(SearchResult)
-	if err := s.client.decoder.Decode(res.Body, ret); err != nil {
-		ret.Header = res.Header
-		return nil, err
-	}
-	ret.Header = res.Header
-	return ret, nil
 }
 
 // SearchResult is the result of a search in Elasticsearch.
