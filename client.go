@@ -259,7 +259,6 @@ func NewSimpleClient(options ...ClientOptionFunc) (*Client, error) {
 	if len(c.urls) == 0 {
 		c.urls = []string{DefaultURL}
 	}
-	c.urls = canonicalize(c.urls...)
 
 	// If the URLs have auth info, use them here as an alternative to SetBasicAuth
 	if c.basicAuthUsername == "" && c.basicAuthPassword == "" {
@@ -332,7 +331,6 @@ func DialContext(ctx context.Context, options ...ClientOptionFunc) (*Client, err
 	if len(c.urls) == 0 {
 		c.urls = []string{DefaultURL}
 	}
-	c.urls = canonicalize(c.urls...)
 
 	// If the URLs have auth info, use them here as an alternative to SetBasicAuth
 	if c.basicAuthUsername == "" && c.basicAuthPassword == "" {
