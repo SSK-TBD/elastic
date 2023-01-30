@@ -10,23 +10,23 @@ import (
 	"testing"
 )
 
-func TestIntervalQuery_Integration(t *testing.T) {
-	// client := setupTestClientAndCreateIndexAndAddDocs(t, SetTraceLog(log.New(os.Stdout, "", log.LstdFlags)))
-	client := setupTestClientAndCreateIndexAndAddDocs(t)
+// func TestIntervalQuery_Integration(t *testing.T) {
+// 	// client := setupTestClientAndCreateIndexAndAddDocs(t, SetTraceLog(log.New(os.Stdout, "", log.LstdFlags)))
+// 	client := setupTestClientAndCreateIndexAndAddDocs(t)
 
-	t.Run("Match", func(t *testing.T) {
-		testIntervalQueryMatch(client, t)
-	})
-	t.Run("Prefix", func(t *testing.T) {
-		testIntervalQueryPrefix(client, t)
-	})
-	t.Run("Wildcard", func(t *testing.T) {
-		testIntervalQueryWildcard(client, t)
-	})
-	t.Run("Fuzzy", func(t *testing.T) {
-		testIntervalQueryFuzzy(client, t)
-	})
-}
+// 	t.Run("Match", func(t *testing.T) {
+// 		testIntervalQueryMatch(client, t)
+// 	})
+// 	t.Run("Prefix", func(t *testing.T) {
+// 		testIntervalQueryPrefix(client, t)
+// 	})
+// 	t.Run("Wildcard", func(t *testing.T) {
+// 		testIntervalQueryWildcard(client, t)
+// 	})
+// 	t.Run("Fuzzy", func(t *testing.T) {
+// 		testIntervalQueryFuzzy(client, t)
+// 	})
+// }
 
 func testIntervalQueryMatch(client *Client, t *testing.T) {
 	q := NewIntervalQuery(

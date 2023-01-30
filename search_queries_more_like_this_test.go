@@ -5,7 +5,6 @@
 package elastic
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 )
@@ -46,47 +45,5 @@ func TestMoreLikeThisQuerySourceWithLikeAndUnlikeItems(t *testing.T) {
 	expected := `{"more_like_this":{"like":[{"_id":"1"},{"_id":"2","_index":"elastic-test2","_type":"comment","routing":"routing_id"}],"unlike":[{"_id":"3"}]}}`
 	if got != expected {
 		t.Fatalf("expected\n%s\n,got:\n%s", expected, got)
-	}
-}
-
-func TestMoreLikeThisQuery(t *testing.T) {
-	client := setupTestClientAndCreateIndex(t)
-
-	tweet1 := tweet{User: "olivere", Message: "Welcome to Golang and Elasticsearch."}
-	tweet2 := tweet{User: "olivere", Message: "Another Golang topic."}
-	tweet3 := tweet{User: "sandrae", Message: "Cycling is fun."}
-
-	// Add all documents
-	_, err := client.Index().Index(testIndexName).Id("1").BodyJson(&tweet1).Do(context.TODO())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = client.Index().Index(testIndexName).Id("2").BodyJson(&tweet2).Do(context.TODO())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = client.Index().Index(testIndexName).Id("3").BodyJson(&tweet3).Do(context.TODO())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = client.Refresh().Index(testIndexName).Do(context.TODO())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Common query
-	mltq := NewMoreLikeThisQuery().LikeText("Golang topic").Field("message")
-	res, err := client.Search().
-		Index(testIndexName).
-		Query(mltq).
-		Do(context.TODO())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Hits == nil {
-		t.Errorf("expected SearchResult.Hits != nil; got nil")
 	}
 }

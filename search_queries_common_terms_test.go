@@ -5,7 +5,6 @@
 package elastic
 
 import (
-	"context"
 	"encoding/json"
 	_ "net/http"
 	"testing"
@@ -25,61 +24,5 @@ func TestCommonTermsQuery(t *testing.T) {
 	expected := `{"common":{"message":{"cutoff_frequency":0.001,"query":"Golang"}}}`
 	if got != expected {
 		t.Errorf("expected\n%s\n,got:\n%s", expected, got)
-	}
-}
-
-func TestSearchQueriesCommonTermsQuery(t *testing.T) {
-	client := setupTestClientAndCreateIndex(t)
-
-	tweet1 := tweet{User: "olivere", Message: "Welcome to Golang and Elasticsearch."}
-	tweet2 := tweet{User: "olivere", Message: "Another unrelated topic."}
-	tweet3 := tweet{User: "sandrae", Message: "Cycling is fun."}
-
-	// Add all documents
-	_, err := client.Index().Index(testIndexName).Id("1").BodyJson(&tweet1).Do(context.TODO())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = client.Index().Index(testIndexName).Id("2").BodyJson(&tweet2).Do(context.TODO())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = client.Index().Index(testIndexName).Id("3").BodyJson(&tweet3).Do(context.TODO())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = client.Refresh().Index(testIndexName).Do(context.TODO())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Common terms query
-	q := NewCommonTermsQuery("message", "Golang")
-	searchResult, err := client.Search().Index(testIndexName).Query(q).Do(context.TODO())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if searchResult.Hits == nil {
-		t.Errorf("expected SearchResult.Hits != nil; got nil")
-	}
-	if searchResult.TotalHits() != 1 {
-		t.Errorf("expected SearchResult.TotalHits() = %d; got %d", 1, searchResult.TotalHits())
-	}
-	if len(searchResult.Hits.Hits) != 1 {
-		t.Errorf("expected len(SearchResult.Hits.Hits) = %d; got %d", 1, len(searchResult.Hits.Hits))
-	}
-
-	for _, hit := range searchResult.Hits.Hits {
-		if hit.Index != testIndexName {
-			t.Errorf("expected SearchResult.Hits.Hit.Index = %q; got %q", testIndexName, hit.Index)
-		}
-		item := make(map[string]interface{})
-		err := json.Unmarshal(hit.Source, &item)
-		if err != nil {
-			t.Fatal(err)
-		}
 	}
 }
