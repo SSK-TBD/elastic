@@ -5,7 +5,6 @@
 package elastic
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -20,8 +19,6 @@ import (
 // See https://www.elastic.co/guide/en/elasticsearch/reference/7.x/point-in-time-api.html
 // for details.
 type OpenPointInTimeService struct {
-	client *Client
-
 	pretty     *bool       // pretty format the returned JSON response
 	human      *bool       // return human readable values for statistics
 	errorTrace *bool       // include the stack trace of returned errors
@@ -39,10 +36,8 @@ type OpenPointInTimeService struct {
 }
 
 // NewOpenPointInTimeService creates a new OpenPointInTimeService.
-func NewOpenPointInTimeService(client *Client) *OpenPointInTimeService {
-	return &OpenPointInTimeService{
-		client: client,
-	}
+func NewOpenPointInTimeService() *OpenPointInTimeService {
+	return &OpenPointInTimeService{}
 }
 
 // Pretty tells Elasticsearch whether to return a formatted JSON response.
@@ -198,50 +193,4 @@ func (s *OpenPointInTimeService) Validate() error {
 		return fmt.Errorf("missing required fields: %v", invalid)
 	}
 	return nil
-}
-
-// Do executes the operation.
-func (s *OpenPointInTimeService) Do(ctx context.Context) (*OpenPointInTimeResponse, error) {
-	// Check pre-conditions
-	if err := s.Validate(); err != nil {
-		return nil, err
-	}
-
-	// Get URL for request
-	method, path, params, err := s.buildURL()
-	if err != nil {
-		return nil, err
-	}
-
-	// Setup HTTP request body
-	var body interface{}
-	if s.bodyJson != nil {
-		body = s.bodyJson
-	} else {
-		body = s.bodyString
-	}
-
-	// Get HTTP response
-	res, err := s.client.PerformRequest(ctx, PerformRequestOptions{
-		Method:  method,
-		Path:    path,
-		Params:  params,
-		Body:    body,
-		Headers: s.headers,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Return operation response
-	ret := new(OpenPointInTimeResponse)
-	if err := s.client.decoder.Decode(res.Body, ret); err != nil {
-		return nil, err
-	}
-	return ret, nil
-}
-
-// OpenPointInTimeResponse is the result of opening a point in time.
-type OpenPointInTimeResponse struct {
-	Id string `json:"id,omitempty"`
 }

@@ -5,7 +5,6 @@
 package elastic
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -18,8 +17,6 @@ import (
 // SearchShardsService returns the indices and shards that a search request would be executed against.
 // See https://www.elastic.co/guide/en/elasticsearch/reference/7.0/search-shards.html
 type SearchShardsService struct {
-	client *Client
-
 	pretty     *bool       // pretty format the returned JSON response
 	human      *bool       // return human readable values for statistics
 	errorTrace *bool       // include the stack trace of returned errors
@@ -33,13 +30,6 @@ type SearchShardsService struct {
 	ignoreUnavailable *bool
 	allowNoIndices    *bool
 	expandWildcards   string
-}
-
-// NewSearchShardsService creates a new SearchShardsService.
-func NewSearchShardsService(client *Client) *SearchShardsService {
-	return &SearchShardsService{
-		client: client,
-	}
 }
 
 // Pretty tells Elasticsearch whether to return a formatted JSON response.
@@ -184,38 +174,6 @@ func (s *SearchShardsService) Validate() error {
 		return fmt.Errorf("missing required fields: %v", invalid)
 	}
 	return nil
-}
-
-// Do executes the operation.
-func (s *SearchShardsService) Do(ctx context.Context) (*SearchShardsResponse, error) {
-	// Check pre-conditions
-	if err := s.Validate(); err != nil {
-		return nil, err
-	}
-
-	// Get URL for request
-	path, params, err := s.buildURL()
-	if err != nil {
-		return nil, err
-	}
-
-	// Get HTTP response
-	res, err := s.client.PerformRequest(ctx, PerformRequestOptions{
-		Method:  "GET",
-		Path:    path,
-		Params:  params,
-		Headers: s.headers,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Return operation response
-	ret := new(SearchShardsResponse)
-	if err := s.client.decoder.Decode(res.Body, ret); err != nil {
-		return nil, err
-	}
-	return ret, nil
 }
 
 // SearchShardsResponse is the response of SearchShardsService.Do.

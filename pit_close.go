@@ -5,7 +5,6 @@
 package elastic
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -17,8 +16,6 @@ import (
 // See https://www.elastic.co/guide/en/elasticsearch/reference/7.x/point-in-time-api.html
 // for details.
 type ClosePointInTimeService struct {
-	client *Client
-
 	pretty     *bool       // pretty format the returned JSON response
 	human      *bool       // return human readable values for statistics
 	errorTrace *bool       // include the stack trace of returned errors
@@ -31,10 +28,8 @@ type ClosePointInTimeService struct {
 }
 
 // NewClosePointInTimeService creates a new ClosePointInTimeService.
-func NewClosePointInTimeService(client *Client) *ClosePointInTimeService {
-	return &ClosePointInTimeService{
-		client: client,
-	}
+func NewClosePointInTimeService() *ClosePointInTimeService {
+	return &ClosePointInTimeService{}
 }
 
 // Pretty tells Elasticsearch whether to return a formatted JSON response.
@@ -122,55 +117,4 @@ func (s *ClosePointInTimeService) buildURL() (string, string, url.Values, error)
 // Validate checks if the operation is valid.
 func (s *ClosePointInTimeService) Validate() error {
 	return nil
-}
-
-// Do executes the operation.
-func (s *ClosePointInTimeService) Do(ctx context.Context) (*ClosePointInTimeResponse, error) {
-	// Check pre-conditions
-	if err := s.Validate(); err != nil {
-		return nil, err
-	}
-
-	// Get URL for request
-	method, path, params, err := s.buildURL()
-	if err != nil {
-		return nil, err
-	}
-
-	// Setup HTTP request body
-	var body interface{}
-	if s.id != "" {
-		body = map[string]interface{}{
-			"id": s.id,
-		}
-	} else if s.bodyJson != nil {
-		body = s.bodyJson
-	} else {
-		body = s.bodyString
-	}
-
-	// Get HTTP response
-	res, err := s.client.PerformRequest(ctx, PerformRequestOptions{
-		Method:  method,
-		Path:    path,
-		Params:  params,
-		Body:    body,
-		Headers: s.headers,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Return operation response
-	ret := new(ClosePointInTimeResponse)
-	if err := s.client.decoder.Decode(res.Body, ret); err != nil {
-		return nil, err
-	}
-	return ret, nil
-}
-
-// ClosePointInTimeResponse is the result of closing a point in time.
-type ClosePointInTimeResponse struct {
-	Succeeded bool `json:"succeeded,omitempty"`
-	NumFreed  int  `json:"num_freed,omitempty"`
 }

@@ -5,8 +5,6 @@
 package elastic
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -22,8 +20,6 @@ import (
 // See https://www.elastic.co/guide/en/elasticsearch/reference/7.0/docs-multi-termvectors.html
 // for documentation.
 type MultiTermvectorService struct {
-	client *Client
-
 	pretty     *bool       // pretty format the returned JSON response
 	human      *bool       // return human readable values for statistics
 	errorTrace *bool       // include the stack trace of returned errors
@@ -51,10 +47,8 @@ type MultiTermvectorService struct {
 }
 
 // NewMultiTermvectorService creates a new MultiTermvectorService.
-func NewMultiTermvectorService(client *Client) *MultiTermvectorService {
-	return &MultiTermvectorService{
-		client: client,
-	}
+func NewMultiTermvectorService() *MultiTermvectorService {
+	return &MultiTermvectorService{}
 }
 
 // Pretty tells Elasticsearch whether to return a formatted JSON response.
@@ -302,49 +296,6 @@ func (s *MultiTermvectorService) Validate() error {
 		return fmt.Errorf("missing required fields: %v", invalid)
 	}
 	return nil
-}
-
-// Do executes the operation.
-func (s *MultiTermvectorService) Do(ctx context.Context) (*MultiTermvectorResponse, error) {
-	// Check pre-conditions
-	if err := s.Validate(); err != nil {
-		return nil, err
-	}
-
-	// Get URL for request
-	path, params, err := s.buildURL()
-	if err != nil {
-		return nil, err
-	}
-
-	// Setup HTTP request body
-	var body interface{}
-	if s.bodyJson != nil {
-		body = s.bodyJson
-	} else if len(s.bodyString) > 0 {
-		body = s.bodyString
-	} else {
-		body = s.Source()
-	}
-
-	// Get HTTP response
-	res, err := s.client.PerformRequest(ctx, PerformRequestOptions{
-		Method:  "GET",
-		Path:    path,
-		Params:  params,
-		Body:    body,
-		Headers: s.headers,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Return operation response
-	ret := new(MultiTermvectorResponse)
-	if err := json.Unmarshal(res.Body, ret); err != nil {
-		return nil, err
-	}
-	return ret, nil
 }
 
 // MultiTermvectorResponse is the response of MultiTermvectorService.Do.

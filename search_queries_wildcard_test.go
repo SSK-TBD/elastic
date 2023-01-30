@@ -5,33 +5,11 @@
 package elastic_test
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
 	"github.com/SSK-TBD/elastic/v7"
 )
-
-func ExampleWildcardQuery() {
-	// Get a client to the local Elasticsearch instance.
-	client, err := elastic.NewClient()
-	if err != nil {
-		// Handle error
-		panic(err)
-	}
-
-	// Define wildcard query
-	q := elastic.NewWildcardQuery("user", "oli*er?").Boost(1.2)
-	searchResult, err := client.Search().
-		Index("twitter").  // search in index "twitter"
-		Query(q).          // use wildcard query defined above
-		Do(context.TODO()) // execute
-	if err != nil {
-		// Handle error
-		panic(err)
-	}
-	_ = searchResult
-}
 
 func TestWildcardQuery(t *testing.T) {
 	q := elastic.NewWildcardQuery("user", "ki*y??")

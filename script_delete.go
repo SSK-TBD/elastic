@@ -5,7 +5,6 @@
 package elastic
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -19,8 +18,6 @@ import (
 // See https://www.elastic.co/guide/en/elasticsearch/reference/7.0/modules-scripting.html
 // for details.
 type DeleteScriptService struct {
-	client *Client
-
 	pretty     *bool       // pretty format the returned JSON response
 	human      *bool       // return human readable values for statistics
 	errorTrace *bool       // include the stack trace of returned errors
@@ -33,10 +30,8 @@ type DeleteScriptService struct {
 }
 
 // NewDeleteScriptService creates a new DeleteScriptService.
-func NewDeleteScriptService(client *Client) *DeleteScriptService {
-	return &DeleteScriptService{
-		client: client,
-	}
+func NewDeleteScriptService() *DeleteScriptService {
+	return &DeleteScriptService{}
 }
 
 // Pretty tells Elasticsearch whether to return a formatted JSON response.
@@ -145,42 +140,4 @@ func (s *DeleteScriptService) Validate() error {
 		return fmt.Errorf("missing required fields: %v", invalid)
 	}
 	return nil
-}
-
-// Do executes the operation.
-func (s *DeleteScriptService) Do(ctx context.Context) (*DeleteScriptResponse, error) {
-	// Check pre-conditions
-	if err := s.Validate(); err != nil {
-		return nil, err
-	}
-
-	// Get URL for request
-	method, path, params, err := s.buildURL()
-	if err != nil {
-		return nil, err
-	}
-
-	// Get HTTP response
-	res, err := s.client.PerformRequest(ctx, PerformRequestOptions{
-		Method:  method,
-		Path:    path,
-		Params:  params,
-		Headers: s.headers,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Return operation response
-	ret := new(DeleteScriptResponse)
-	if err := s.client.decoder.Decode(res.Body, ret); err != nil {
-		return nil, err
-	}
-	return ret, nil
-}
-
-// DeleteScriptResponse is the result of deleting a stored script
-// in Elasticsearch.
-type DeleteScriptResponse struct {
-	AcknowledgedResponse
 }

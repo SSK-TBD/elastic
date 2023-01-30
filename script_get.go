@@ -5,8 +5,6 @@
 package elastic
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -20,8 +18,6 @@ import (
 // See https://www.elastic.co/guide/en/elasticsearch/reference/7.0/modules-scripting.html
 // for details.
 type GetScriptService struct {
-	client *Client
-
 	pretty     *bool       // pretty format the returned JSON response
 	human      *bool       // return human readable values for statistics
 	errorTrace *bool       // include the stack trace of returned errors
@@ -32,10 +28,8 @@ type GetScriptService struct {
 }
 
 // NewGetScriptService creates a new GetScriptService.
-func NewGetScriptService(client *Client) *GetScriptService {
-	return &GetScriptService{
-		client: client,
-	}
+func NewGetScriptService() *GetScriptService {
+	return &GetScriptService{}
 }
 
 // Pretty tells Elasticsearch whether to return a formatted JSON response.
@@ -126,44 +120,4 @@ func (s *GetScriptService) Validate() error {
 		return fmt.Errorf("missing required fields: %v", invalid)
 	}
 	return nil
-}
-
-// Do executes the operation.
-func (s *GetScriptService) Do(ctx context.Context) (*GetScriptResponse, error) {
-	// Check pre-conditions
-	if err := s.Validate(); err != nil {
-		return nil, err
-	}
-
-	// Get URL for request
-	method, path, params, err := s.buildURL()
-	if err != nil {
-		return nil, err
-	}
-
-	// Get HTTP response
-	res, err := s.client.PerformRequest(ctx, PerformRequestOptions{
-		Method:  method,
-		Path:    path,
-		Params:  params,
-		Headers: s.headers,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Return operation response
-	ret := new(GetScriptResponse)
-	if err := s.client.decoder.Decode(res.Body, ret); err != nil {
-		return nil, err
-	}
-	return ret, nil
-}
-
-// GetScriptResponse is the result of getting a stored script
-// in Elasticsearch.
-type GetScriptResponse struct {
-	Id     string          `json:"_id"`
-	Found  bool            `json:"found"`
-	Script json.RawMessage `json:"script"`
 }
