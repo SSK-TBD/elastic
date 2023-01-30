@@ -97,9 +97,6 @@ var (
 	// didn't return in time.
 	ErrTimeout = errors.New("timeout")
 
-	// noRetries is a retrier that does not retry.
-	noRetries = NewStopRetrier()
-
 	// noDeprecationLog is a no-op for logging deprecations.
 	noDeprecationLog = func(*http.Request, *http.Response) {}
 )
@@ -146,7 +143,6 @@ type Client struct {
 	sendGetBodyAs             string          // override for when sending a GET with a body
 	gzipEnabled               bool            // gzip compression enabled or disabled (default)
 	requiredPlugins           []string        // list of required plugins
-	retrier                   Retrier         // strategy for retries
 	retryStatusCodes          []int           // HTTP status codes where to retry automatically (with retrier)
 	headers                   http.Header     // a list of default headers to add to each request
 }
@@ -248,7 +244,6 @@ func NewSimpleClient(options ...ClientOptionFunc) (*Client, error) {
 		snifferStop:               make(chan bool),
 		sendGetBodyAs:             DefaultSendGetBodyAs,
 		gzipEnabled:               DefaultGzipEnabled,
-		retrier:                   noRetries, // no retries by default
 		retryStatusCodes:          nil,       // no automatic retries for specific HTTP status codes
 		deprecationlog:            noDeprecationLog,
 	}
@@ -322,7 +317,6 @@ func DialContext(ctx context.Context, options ...ClientOptionFunc) (*Client, err
 		snifferStop:               make(chan bool),
 		sendGetBodyAs:             DefaultSendGetBodyAs,
 		gzipEnabled:               DefaultGzipEnabled,
-		retrier:                   noRetries, // no retries by default
 		retryStatusCodes:          nil,       // no automatic retries for specific HTTP status codes
 		deprecationlog:            noDeprecationLog,
 	}
@@ -571,30 +565,6 @@ func SetHealthcheckInterval(interval time.Duration) ClientOptionFunc {
 	}
 }
 
-// SetMaxRetries sets the maximum number of retries before giving up when
-// performing a HTTP request to Elasticsearch.
-//
-// Deprecated: Replace with a Retry implementation.
-func SetMaxRetries(maxRetries int) ClientOptionFunc {
-	return func(c *Client) error {
-		if maxRetries < 0 {
-			return errors.New("MaxRetries must be greater than or equal to 0")
-		} else if maxRetries == 0 {
-			c.retrier = noRetries
-		} else {
-			// Create a Retrier that will wait for 100ms (+/- jitter) between requests.
-			// This resembles the old behavior with maxRetries.
-			ticks := make([]int, maxRetries)
-			for i := 0; i < len(ticks); i++ {
-				ticks[i] = 100
-			}
-			backoff := NewSimpleBackoff(ticks...)
-			c.retrier = NewBackoffRetrier(backoff)
-		}
-		return nil
-	}
-}
-
 // SetGzip enables or disables gzip compression (disabled by default).
 func SetGzip(enabled bool) ClientOptionFunc {
 	return func(c *Client) error {
@@ -660,18 +630,6 @@ func SetTraceLog(logger Logger) ClientOptionFunc {
 func SetSendGetBodyAs(httpMethod string) ClientOptionFunc {
 	return func(c *Client) error {
 		c.sendGetBodyAs = httpMethod
-		return nil
-	}
-}
-
-// SetRetrier specifies the retry strategy that handles errors during
-// HTTP request/response with Elasticsearch.
-func SetRetrier(retrier Retrier) ClientOptionFunc {
-	return func(c *Client) error {
-		if retrier == nil {
-			retrier = noRetries // no retries by default
-		}
-		c.retrier = retrier
 		return nil
 	}
 }
@@ -1093,7 +1051,6 @@ type PerformRequestOptions struct {
 	Body             interface{}
 	ContentType      string
 	IgnoreErrors     []int
-	Retrier          Retrier
 	RetryStatusCodes []int
 	Headers          http.Header
 	MaxResponseSize  int64
@@ -1113,40 +1070,18 @@ func (c *Client) PerformRequest(ctx context.Context, opt PerformRequestOptions) 
 	start := time.Now().UTC()
 
 	c.mu.RLock()
-	timeout := c.healthcheckTimeout
 	basicAuth := c.basicAuthUsername != "" || c.basicAuthPassword != ""
 	basicAuthUsername := c.basicAuthUsername
 	basicAuthPassword := c.basicAuthPassword
 	sendGetBodyAs := c.sendGetBodyAs
 	gzipEnabled := c.gzipEnabled
-	healthcheckEnabled := c.healthcheckEnabled
-	retrier := c.retrier
-	if opt.Retrier != nil {
-		retrier = opt.Retrier
-	}
-	retryStatusCodes := c.retryStatusCodes
-	if opt.RetryStatusCodes != nil {
-		retryStatusCodes = opt.RetryStatusCodes
-	}
 	defaultHeaders := c.headers
 	c.mu.RUnlock()
-
-	// retry returns true if statusCode indicates the request is to be retried
-	retry := func(statusCode int) bool {
-		for _, code := range retryStatusCodes {
-			if code == statusCode {
-				return true
-			}
-		}
-		return false
-	}
 
 	var err error
 	var conn *conn
 	var req *Request
 	var resp *Response
-	var retried bool
-	var n int
 
 	// Change method if sendGetBodyAs is specified.
 	if opt.Method == "GET" && opt.Body != nil && sendGetBodyAs != "GET" {
@@ -1161,27 +1096,6 @@ func (c *Client) PerformRequest(ctx context.Context, opt PerformRequestOptions) 
 
 		// Get a connection
 		conn, err = c.next()
-		if errors.Cause(err) == ErrNoClient {
-			n++
-			if !retried {
-				// Force a healtcheck as all connections seem to be dead.
-				c.healthcheck(ctx, timeout, false)
-				if healthcheckEnabled {
-					retried = true
-					continue
-				}
-			}
-			wait, ok, rerr := retrier.Retry(ctx, n, nil, nil, err)
-			if rerr != nil {
-				return nil, rerr
-			}
-			if !ok {
-				return nil, err
-			}
-			retried = true
-			time.Sleep(wait)
-			continue // try again
-		}
 		if err != nil {
 			c.errorf("elastic: cannot get connection from pool")
 			return nil, err
@@ -1231,38 +1145,6 @@ func (c *Client) PerformRequest(ctx context.Context, opt PerformRequestOptions) 
 		if IsContextErr(err) {
 			// Proceed, but don't mark the node as dead
 			return nil, err
-		}
-		if err != nil {
-			n++
-			wait, ok, rerr := retrier.Retry(ctx, n, (*http.Request)(req), res, err)
-			if rerr != nil {
-				c.errorf("elastic: %s is dead", conn.URL())
-				conn.MarkAsDead()
-				return nil, rerr
-			}
-			if !ok {
-				c.errorf("elastic: %s is dead", conn.URL())
-				conn.MarkAsDead()
-				return nil, err
-			}
-			retried = true
-			time.Sleep(wait)
-			continue // try again
-		}
-		if retry(res.StatusCode) {
-			n++
-			wait, ok, rerr := retrier.Retry(ctx, n, (*http.Request)(req), res, err)
-			if rerr != nil {
-				c.errorf("elastic: %s is dead", conn.URL())
-				conn.MarkAsDead()
-				return nil, rerr
-			}
-			if ok {
-				// retry
-				retried = true
-				time.Sleep(wait)
-				continue // try again
-			}
 		}
 
 		if !opt.Stream {

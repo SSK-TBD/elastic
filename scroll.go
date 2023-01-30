@@ -24,7 +24,6 @@ const (
 // ScrollService iterates over pages of search results from Elasticsearch.
 type ScrollService struct {
 	client  *Client
-	retrier Retrier
 
 	pretty     *bool       // pretty format the returned JSON response
 	human      *bool       // return human readable values for statistics
@@ -98,13 +97,6 @@ func (s *ScrollService) Header(name string, value string) *ScrollService {
 // Headers specifies the headers of the request.
 func (s *ScrollService) Headers(headers http.Header) *ScrollService {
 	s.headers = headers
-	return s
-}
-
-// Retrier allows to set specific retry logic for this ScrollService.
-// If not specified, it will use the client's default retrier.
-func (s *ScrollService) Retrier(retrier Retrier) *ScrollService {
-	s.retrier = retrier
 	return s
 }
 
@@ -388,7 +380,6 @@ func (s *ScrollService) Clear(ctx context.Context) error {
 		Path:    path,
 		Params:  params,
 		Body:    body,
-		Retrier: s.retrier,
 	})
 	if err != nil {
 		return err
@@ -419,7 +410,6 @@ func (s *ScrollService) first(ctx context.Context) (*SearchResult, error) {
 		Path:            path,
 		Params:          params,
 		Body:            body,
-		Retrier:         s.retrier,
 		Headers:         s.headers,
 		MaxResponseSize: s.maxResponseSize,
 	})
@@ -567,7 +557,6 @@ func (s *ScrollService) next(ctx context.Context) (*SearchResult, error) {
 		Path:            path,
 		Params:          params,
 		Body:            body,
-		Retrier:         s.retrier,
 		Headers:         s.headers,
 		MaxResponseSize: s.maxResponseSize,
 	})
