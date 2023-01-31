@@ -219,21 +219,6 @@ func (a Aggregations) PercentileRanks(name string) (*AggregationPercentilesMetri
 	return nil, false
 }
 
-// TopHits returns top-hits aggregation results.
-// See: https://www.elastic.co/guide/en/elasticsearch/reference/7.0/search-aggregations-metrics-top-hits-aggregation.html
-func (a Aggregations) TopHits(name string) (*AggregationTopHitsMetric, bool) {
-	if raw, found := a[name]; found {
-		agg := new(AggregationTopHitsMetric)
-		if raw == nil {
-			return agg, true
-		}
-		if err := json.Unmarshal(raw, agg); err == nil {
-			return agg, true
-		}
-	}
-	return nil, false
-}
-
 // Global returns global results.
 // See: https://www.elastic.co/guide/en/elasticsearch/reference/7.0/search-aggregations-bucket-global-aggregation.html
 func (a Aggregations) Global(name string) (*AggregationSingleBucket, bool) {
@@ -1057,33 +1042,6 @@ func (a *AggregationPercentilesMetric) UnmarshalJSON(data []byte) error {
 		json.Unmarshal(v, &a.Meta)
 	}
 	a.Aggregations = aggs
-	return nil
-}
-
-// -- Top-hits metric --
-
-// AggregationTopHitsMetric is a metric returned by a TopHits aggregation.
-type AggregationTopHitsMetric struct {
-	Aggregations
-
-	Hits *SearchHits            //`json:"hits"`
-	Meta map[string]interface{} // `json:"meta,omitempty"`
-}
-
-// UnmarshalJSON decodes JSON data and initializes an AggregationTopHitsMetric structure.
-func (a *AggregationTopHitsMetric) UnmarshalJSON(data []byte) error {
-	var aggs map[string]json.RawMessage
-	if err := json.Unmarshal(data, &aggs); err != nil {
-		return err
-	}
-	a.Aggregations = aggs
-	a.Hits = new(SearchHits)
-	if v, ok := aggs["hits"]; ok && v != nil {
-		json.Unmarshal(v, &a.Hits)
-	}
-	if v, ok := aggs["meta"]; ok && v != nil {
-		json.Unmarshal(v, &a.Meta)
-	}
 	return nil
 }
 
