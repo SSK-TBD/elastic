@@ -7,10 +7,6 @@ package elastic
 import (
 	"fmt"
 	"net/http"
-	"net/url"
-	"strings"
-
-	"github.com/SSK-TBD/elastic/v7/uritemplates"
 )
 
 // OpenPointInTimeService opens a point in time that can be used in subsequent
@@ -128,56 +124,6 @@ func (s *OpenPointInTimeService) BodyJson(body interface{}) *OpenPointInTimeServ
 func (s *OpenPointInTimeService) BodyString(body string) *OpenPointInTimeService {
 	s.bodyString = body
 	return s
-}
-
-// buildURL builds the URL for the operation.
-func (s *OpenPointInTimeService) buildURL() (string, string, url.Values, error) {
-	var err error
-	var method, path string
-
-	if len(s.index) > 0 {
-		method = "POST"
-		path, err = uritemplates.Expand("/{index}/_pit", map[string]string{
-			"index": strings.Join(s.index, ","),
-		})
-	} else {
-		method = "POST"
-		path = "/_pit"
-	}
-	if err != nil {
-		return "", "", url.Values{}, err
-	}
-
-	// Add query string parameters
-	params := url.Values{}
-	if v := s.pretty; v != nil {
-		params.Set("pretty", fmt.Sprint(*v))
-	}
-	if v := s.human; v != nil {
-		params.Set("human", fmt.Sprint(*v))
-	}
-	if v := s.errorTrace; v != nil {
-		params.Set("error_trace", fmt.Sprint(*v))
-	}
-	if len(s.filterPath) > 0 {
-		params.Set("filter_path", strings.Join(s.filterPath, ","))
-	}
-	if s.preference != "" {
-		params.Set("preference", s.preference)
-	}
-	if s.routing != "" {
-		params.Set("routing", s.routing)
-	}
-	if s.ignoreUnavailable != nil {
-		params.Set("ignore_unavailable", fmt.Sprintf("%v", *s.ignoreUnavailable))
-	}
-	if s.expandWildcards != "" {
-		params.Set("expand_wildcards", s.expandWildcards)
-	}
-	if s.keepAlive != "" {
-		params.Set("keep_alive", s.keepAlive)
-	}
-	return method, path, params, nil
 }
 
 // Validate checks if the operation is valid.

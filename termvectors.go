@@ -5,12 +5,7 @@
 package elastic
 
 import (
-	"fmt"
 	"net/http"
-	"net/url"
-	"strings"
-
-	"github.com/SSK-TBD/elastic/v7/uritemplates"
 )
 
 // TermvectorsService returns information and statistics on terms in the
@@ -224,101 +219,6 @@ func (s *TermvectorsService) BodyJson(body interface{}) *TermvectorsService {
 func (s *TermvectorsService) BodyString(body string) *TermvectorsService {
 	s.bodyString = body
 	return s
-}
-
-// buildURL builds the URL for the operation.
-func (s *TermvectorsService) buildURL() (string, url.Values, error) {
-	var pathParam = map[string]string{
-		"index": s.index,
-	}
-	path := "/{index}"
-	var err error
-
-	if s.typ != "" {
-		pathParam["type"] = s.typ
-		path += "/{type}"
-	} else {
-		path += "/_termvectors"
-	}
-	if s.id != "" {
-		pathParam["id"] = s.id
-		path += "/{id}"
-	}
-	if s.typ != "" {
-		path += "/_termvectors"
-	}
-
-	path, err = uritemplates.Expand(path, pathParam)
-	if err != nil {
-		return "", url.Values{}, err
-	}
-
-	// Add query string parameters
-	params := url.Values{}
-	if v := s.pretty; v != nil {
-		params.Set("pretty", fmt.Sprint(*v))
-	}
-	if v := s.human; v != nil {
-		params.Set("human", fmt.Sprint(*v))
-	}
-	if v := s.errorTrace; v != nil {
-		params.Set("error_trace", fmt.Sprint(*v))
-	}
-	if len(s.filterPath) > 0 {
-		params.Set("filter_path", strings.Join(s.filterPath, ","))
-	}
-	if v := s.dfs; v != nil {
-		params.Set("dfs", fmt.Sprint(*v))
-	}
-	if v := s.fieldStatistics; v != nil {
-		params.Set("field_statistics", fmt.Sprint(*v))
-	}
-	if len(s.fields) > 0 {
-		params.Set("fields", strings.Join(s.fields, ","))
-	}
-	if v := s.offsets; v != nil {
-		params.Set("offsets", fmt.Sprint(*v))
-	}
-	if s.parent != "" {
-		params.Set("parent", s.parent)
-	}
-	if v := s.payloads; v != nil {
-		params.Set("payloads", fmt.Sprint(*v))
-	}
-	if v := s.positions; v != nil {
-		params.Set("positions", fmt.Sprint(*v))
-	}
-	if s.preference != "" {
-		params.Set("preference", s.preference)
-	}
-	if v := s.realtime; v != nil {
-		params.Set("realtime", fmt.Sprint(*v))
-	}
-	if s.routing != "" {
-		params.Set("routing", s.routing)
-	}
-	if v := s.termStatistics; v != nil {
-		params.Set("term_statistics", fmt.Sprint(*v))
-	}
-	if s.version != nil {
-		params.Set("version", fmt.Sprintf("%v", s.version))
-	}
-	if s.versionType != "" {
-		params.Set("version_type", s.versionType)
-	}
-	return path, params, nil
-}
-
-// Validate checks if the operation is valid.
-func (s *TermvectorsService) Validate() error {
-	var invalid []string
-	if s.index == "" {
-		invalid = append(invalid, "Index")
-	}
-	if len(invalid) > 0 {
-		return fmt.Errorf("missing required fields: %v", invalid)
-	}
-	return nil
 }
 
 // -- Filter settings --

@@ -5,12 +5,7 @@
 package elastic
 
 import (
-	"fmt"
 	"net/http"
-	"net/url"
-	"strings"
-
-	"github.com/SSK-TBD/elastic/v7/uritemplates"
 )
 
 // DeleteScriptService removes a stored script in Elasticsearch.
@@ -90,54 +85,4 @@ func (s *DeleteScriptService) Timeout(timeout string) *DeleteScriptService {
 func (s *DeleteScriptService) MasterTimeout(masterTimeout string) *DeleteScriptService {
 	s.masterTimeout = masterTimeout
 	return s
-}
-
-// buildURL builds the URL for the operation.
-func (s *DeleteScriptService) buildURL() (string, string, url.Values, error) {
-	var (
-		err    error
-		method = "DELETE"
-		path   string
-	)
-
-	path, err = uritemplates.Expand("/_scripts/{id}", map[string]string{
-		"id": s.id,
-	})
-	if err != nil {
-		return "", "", url.Values{}, err
-	}
-
-	// Add query string parameters
-	params := url.Values{}
-	if v := s.pretty; v != nil {
-		params.Set("pretty", fmt.Sprint(*v))
-	}
-	if v := s.human; v != nil {
-		params.Set("human", fmt.Sprint(*v))
-	}
-	if v := s.errorTrace; v != nil {
-		params.Set("error_trace", fmt.Sprint(*v))
-	}
-	if len(s.filterPath) > 0 {
-		params.Set("filter_path", strings.Join(s.filterPath, ","))
-	}
-	if s.timeout != "" {
-		params.Set("timeout", s.timeout)
-	}
-	if s.masterTimeout != "" {
-		params.Set("master_timestamp", s.masterTimeout)
-	}
-	return method, path, params, nil
-}
-
-// Validate checks if the operation is valid.
-func (s *DeleteScriptService) Validate() error {
-	var invalid []string
-	if s.id == "" {
-		invalid = append(invalid, "Id")
-	}
-	if len(invalid) > 0 {
-		return fmt.Errorf("missing required fields: %v", invalid)
-	}
-	return nil
 }

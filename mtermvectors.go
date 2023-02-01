@@ -7,10 +7,6 @@ package elastic
 import (
 	"fmt"
 	"net/http"
-	"net/url"
-	"strings"
-
-	"github.com/SSK-TBD/elastic/v7/uritemplates"
 )
 
 // MultiTermvectorService returns information and statistics on terms in the
@@ -207,83 +203,6 @@ func (s *MultiTermvectorService) Source() interface{} {
 	}
 	source["docs"] = docs
 	return source
-}
-
-// buildURL builds the URL for the operation.
-func (s *MultiTermvectorService) buildURL() (string, url.Values, error) {
-	var path string
-	var err error
-
-	if s.index != "" && s.typ != "" {
-		path, err = uritemplates.Expand("/{index}/{type}/_mtermvectors", map[string]string{
-			"index": s.index,
-			"type":  s.typ,
-		})
-	} else if s.index != "" && s.typ == "" {
-		path, err = uritemplates.Expand("/{index}/_mtermvectors", map[string]string{
-			"index": s.index,
-		})
-	} else {
-		path = "/_mtermvectors"
-	}
-	if err != nil {
-		return "", url.Values{}, err
-	}
-
-	// Add query string parameters
-	params := url.Values{}
-	if v := s.pretty; v != nil {
-		params.Set("pretty", fmt.Sprint(*v))
-	}
-	if v := s.human; v != nil {
-		params.Set("human", fmt.Sprint(*v))
-	}
-	if v := s.errorTrace; v != nil {
-		params.Set("error_trace", fmt.Sprint(*v))
-	}
-	if len(s.filterPath) > 0 {
-		params.Set("filter_path", strings.Join(s.filterPath, ","))
-	}
-	if s.fieldStatistics != nil {
-		params.Set("field_statistics", fmt.Sprintf("%v", *s.fieldStatistics))
-	}
-	if len(s.fields) > 0 {
-		params.Set("fields", strings.Join(s.fields, ","))
-	}
-	if len(s.ids) > 0 {
-		params.Set("ids", strings.Join(s.ids, ","))
-	}
-	if s.offsets != nil {
-		params.Set("offsets", fmt.Sprintf("%v", *s.offsets))
-	}
-	if s.parent != "" {
-		params.Set("parent", s.parent)
-	}
-	if s.payloads != nil {
-		params.Set("payloads", fmt.Sprintf("%v", *s.payloads))
-	}
-	if s.positions != nil {
-		params.Set("positions", fmt.Sprintf("%v", *s.positions))
-	}
-	if s.preference != "" {
-		params.Set("preference", s.preference)
-	}
-	if s.realtime != nil {
-		params.Set("realtime", fmt.Sprintf("%v", *s.realtime))
-	}
-	if s.routing != "" {
-		params.Set("routing", s.routing)
-	}
-	if s.termStatistics != nil {
-		params.Set("term_statistics", fmt.Sprintf("%v", *s.termStatistics))
-	}
-	if s.version != nil {
-		params.Set("version", fmt.Sprintf("%v", s.version))
-	}
-	if s.versionType != "" {
-		params.Set("version_type", s.versionType)
-	}
-	return path, params, nil
 }
 
 // Validate checks if the operation is valid.

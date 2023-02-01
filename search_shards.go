@@ -5,13 +5,8 @@
 package elastic
 
 import (
-	"fmt"
 	"net/http"
-	"net/url"
-	"strings"
 	"time"
-
-	"github.com/SSK-TBD/elastic/v7/uritemplates"
 )
 
 // SearchShardsService returns the indices and shards that a search request would be executed against.
@@ -117,83 +112,6 @@ func (s *SearchShardsService) AllowNoIndices(allowNoIndices bool) *SearchShardsS
 func (s *SearchShardsService) ExpandWildcards(expandWildcards string) *SearchShardsService {
 	s.expandWildcards = expandWildcards
 	return s
-}
-
-// buildURL builds the URL for the operation.
-func (s *SearchShardsService) buildURL() (string, url.Values, error) {
-	// Build URL
-	path, err := uritemplates.Expand("/{index}/_search_shards", map[string]string{
-		"index": strings.Join(s.index, ","),
-	})
-	if err != nil {
-		return "", url.Values{}, err
-	}
-
-	// Add query string parameters
-	params := url.Values{}
-	if v := s.pretty; v != nil {
-		params.Set("pretty", fmt.Sprint(*v))
-	}
-	if v := s.human; v != nil {
-		params.Set("human", fmt.Sprint(*v))
-	}
-	if v := s.errorTrace; v != nil {
-		params.Set("error_trace", fmt.Sprint(*v))
-	}
-	if len(s.filterPath) > 0 {
-		params.Set("filter_path", strings.Join(s.filterPath, ","))
-	}
-	if s.preference != "" {
-		params.Set("preference", s.preference)
-	}
-	if s.local != nil {
-		params.Set("local", fmt.Sprintf("%v", *s.local))
-	}
-	if s.routing != "" {
-		params.Set("routing", s.routing)
-	}
-	if s.allowNoIndices != nil {
-		params.Set("allow_no_indices", fmt.Sprintf("%v", *s.allowNoIndices))
-	}
-	if s.expandWildcards != "" {
-		params.Set("expand_wildcards", s.expandWildcards)
-	}
-	if s.ignoreUnavailable != nil {
-		params.Set("ignore_unavailable", fmt.Sprintf("%v", *s.ignoreUnavailable))
-	}
-	return path, params, nil
-}
-
-// Validate checks if the operation is valid.
-func (s *SearchShardsService) Validate() error {
-	var invalid []string
-	if len(s.index) < 1 {
-		invalid = append(invalid, "Index")
-	}
-	if len(invalid) > 0 {
-		return fmt.Errorf("missing required fields: %v", invalid)
-	}
-	return nil
-}
-
-// SearchShardsResponse is the response of SearchShardsService.Do.
-type SearchShardsResponse struct {
-	Nodes   map[string]interface{}              `json:"nodes"`
-	Indices map[string]interface{}              `json:"indices"`
-	Shards  [][]*SearchShardsResponseShardsInfo `json:"shards"`
-}
-
-type SearchShardsResponseShardsInfo struct {
-	Index                    string          `json:"index"`
-	Node                     string          `json:"node"`
-	Primary                  bool            `json:"primary"`
-	Shard                    uint            `json:"shard"`
-	State                    string          `json:"state"`
-	AllocationId             *AllocationId   `json:"allocation_id,omitempty"`
-	RelocatingNode           string          `json:"relocating_node"`
-	ExpectedShardSizeInBytes int64           `json:"expected_shard_size_in_bytes,omitempty"`
-	RecoverySource           *RecoverySource `json:"recovery_source,omitempty"`
-	UnassignedInfo           *UnassignedInfo `json:"unassigned_info,omitempty"`
 }
 
 type RecoverySource struct {
