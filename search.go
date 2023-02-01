@@ -7,81 +7,21 @@ package elastic
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
+	"reflect"
 )
 
 // Search for documents in Elasticsearch.
 type SearchService struct {
-	pretty     *bool       // pretty format the returned JSON response
-	human      *bool       // return human readable values for statistics
-	errorTrace *bool       // include the stack trace of returned errors
-	filterPath []string    // list of filters used to reduce the response
-	headers    http.Header // custom request-level HTTP headers
-
 	searchSource               *SearchSource // q
 	source                     interface{}
-	searchType                 string // search_type
-	index                      []string
-	typ                        []string
-	routing                    string // routing
-	preference                 string // preference
-	requestCache               *bool  // request_cache
-	ignoreUnavailable          *bool  // ignore_unavailable
-	ignoreThrottled            *bool  // ignore_throttled
-	allowNoIndices             *bool  // allow_no_indices
-	expandWildcards            string // expand_wildcards
-	lenient                    *bool  // lenient
-	maxResponseSize            int64
-	allowPartialSearchResults  *bool // allow_partial_search_results
-	typedKeys                  *bool // typed_keys
-	seqNoPrimaryTerm           *bool // seq_no_primary_term
-	batchedReduceSize          *int  // batched_reduce_size
-	maxConcurrentShardRequests *int  // max_concurrent_shard_requests
-	preFilterShardSize         *int  // pre_filter_shard_size
-	restTotalHitsAsInt         *bool // rest_total_hits_as_int
-
-	ccsMinimizeRoundtrips *bool // ccs_minimize_roundtrips
-
 }
 
-// Pretty tells Elasticsearch whether to return a formatted JSON response.
-func (s *SearchService) Pretty(pretty bool) *SearchService {
-	s.pretty = &pretty
-	return s
-}
-
-// Human specifies whether human readable values should be returned in
-// the JSON response, e.g. "7.5mb".
-func (s *SearchService) Human(human bool) *SearchService {
-	s.human = &human
-	return s
-}
-
-// ErrorTrace specifies whether to include the stack trace of returned errors.
-func (s *SearchService) ErrorTrace(errorTrace bool) *SearchService {
-	s.errorTrace = &errorTrace
-	return s
-}
-
-// FilterPath specifies a list of filters used to reduce the response.
-func (s *SearchService) FilterPath(filterPath ...string) *SearchService {
-	s.filterPath = filterPath
-	return s
-}
-
-// Header adds a header to the request.
-func (s *SearchService) Header(name string, value string) *SearchService {
-	if s.headers == nil {
-		s.headers = http.Header{}
+// NewSearchService creates a new service for searching in Elasticsearch.
+func NewSearchService() *SearchService {
+	builder := &SearchService{
+		searchSource: NewSearchSource(),
 	}
-	s.headers.Add(name, value)
-	return s
-}
-
-// Headers specifies the headers of the request.
-func (s *SearchService) Headers(headers http.Header) *SearchService {
-	s.headers = headers
-	return s
+	return builder
 }
 
 // SearchSource sets the search source builder to use with this service.
@@ -97,21 +37,6 @@ func (s *SearchService) SearchSource(searchSource *SearchSource) *SearchService 
 // any of the structs and interfaces in Elastic.
 func (s *SearchService) Source(source interface{}) *SearchService {
 	s.source = source
-	return s
-}
-
-// Index sets the names of the indices to use for search.
-func (s *SearchService) Index(index ...string) *SearchService {
-	s.index = append(s.index, index...)
-	return s
-}
-
-// Type adds search restrictions for a list of types.
-//
-// Deprecated: Types are in the process of being removed. Instead of using a type, prefer to
-// filter on a field on the document.
-func (s *SearchService) Type(typ ...string) *SearchService {
-	s.typ = append(s.typ, typ...)
 	return s
 }
 
@@ -158,39 +83,6 @@ func (s *SearchService) TimeoutInMillis(timeoutInMillis int) *SearchService {
 // each shard, upon reaching which the query execution will terminate early.
 func (s *SearchService) TerminateAfter(terminateAfter int) *SearchService {
 	s.searchSource = s.searchSource.TerminateAfter(terminateAfter)
-	return s
-}
-
-// SearchType sets the search operation type. Valid values are:
-// "dfs_query_then_fetch" and "query_then_fetch".
-// See https://www.elastic.co/guide/en/elasticsearch/reference/7.0/search-request-search-type.html
-// for details.
-func (s *SearchService) SearchType(searchType string) *SearchService {
-	s.searchType = searchType
-	return s
-}
-
-// Routing is a list of specific routing values to control the shards
-// the search will be executed on.
-func (s *SearchService) Routing(routings ...string) *SearchService {
-	s.routing = strings.Join(routings, ",")
-	return s
-}
-
-// Preference sets the preference to execute the search. Defaults to
-// randomize across shards ("random"). Can be set to "_local" to prefer
-// local shards, "_primary" to execute on primary shards only,
-// or a custom value which guarantees that the same order will be used
-// across different requests.
-func (s *SearchService) Preference(preference string) *SearchService {
-	s.preference = preference
-	return s
-}
-
-// RequestCache indicates whether the cache should be used for this
-// request or not, defaults to index level setting.
-func (s *SearchService) RequestCache(requestCache bool) *SearchService {
-	s.requestCache = &requestCache
 	return s
 }
 
@@ -384,118 +276,174 @@ func (s *SearchService) Rescorer(rescore *Rescore) *SearchService {
 	return s
 }
 
-// IgnoreUnavailable indicates whether the specified concrete indices
-// should be ignored when unavailable (missing or closed).
-func (s *SearchService) IgnoreUnavailable(ignoreUnavailable bool) *SearchService {
-	s.ignoreUnavailable = &ignoreUnavailable
-	return s
+// SearchResult is the result of a search in Elasticsearch.
+// FIXME: Is this up-to-date?
+type SearchResult struct {
+	Header          http.Header          `json:"-"`
+	TookInMillis    int64                `json:"took,omitempty"`             // search time in milliseconds
+	TerminatedEarly bool                 `json:"terminated_early,omitempty"` // request terminated early
+	NumReducePhases int                  `json:"num_reduce_phases,omitempty"`
+	Clusters        *SearchResultCluster `json:"_clusters,omitempty"`    // 6.1.0+
+	ScrollId        string               `json:"_scroll_id,omitempty"`   // only used with Scroll and Scan operations
+	Hits            *SearchHits          `json:"hits,omitempty"`         // the actual search hits
+	Suggest         SearchSuggest        `json:"suggest,omitempty"`      // results from suggesters
+	Aggregations    Aggregations         `json:"aggregations,omitempty"` // results from aggregations
+	TimedOut        bool                 `json:"timed_out,omitempty"`    // true if the search timed out
+	Error           *ErrorDetails        `json:"error,omitempty"`        // only used in MultiGet
+	Profile         *SearchProfile       `json:"profile,omitempty"`      // profiling results, if optional Profile API was active for this search
+	Shards          *ShardsInfo          `json:"_shards,omitempty"`      // shard information
+	Status          int                  `json:"status,omitempty"`       // used in MultiSearch
+	PitId           string               `json:"pit_id,omitempty"`       // Point In Time ID
 }
 
-// IgnoreThrottled indicates whether specified concrete, expanded or aliased
-// indices should be ignored when throttled.
-func (s *SearchService) IgnoreThrottled(ignoreThrottled bool) *SearchService {
-	s.ignoreThrottled = &ignoreThrottled
-	return s
+// SearchResultCluster holds information about a search response
+// from a cluster.
+type SearchResultCluster struct {
+	Successful int `json:"successful,omitempty"`
+	Total      int `json:"total,omitempty"`
+	Skipped    int `json:"skipped,omitempty"`
 }
 
-// AllowNoIndices indicates whether to ignore if a wildcard indices
-// expression resolves into no concrete indices. (This includes `_all` string
-// or when no indices have been specified).
-func (s *SearchService) AllowNoIndices(allowNoIndices bool) *SearchService {
-	s.allowNoIndices = &allowNoIndices
-	return s
+// TotalHits is a convenience function to return the number of hits for
+// a search result. The return value might not be accurate, unless
+// track_total_hits parameter has set to true.
+func (r *SearchResult) TotalHits() int64 {
+	if r != nil && r.Hits != nil && r.Hits.TotalHits != nil {
+		return r.Hits.TotalHits.Value
+	}
+	return 0
 }
 
-// ExpandWildcards indicates whether to expand wildcard expression to
-// concrete indices that are open, closed or both.
-func (s *SearchService) ExpandWildcards(expandWildcards string) *SearchService {
-	s.expandWildcards = expandWildcards
-	return s
+// Each is a utility function to iterate over all hits. It saves you from
+// checking for nil values. Notice that Each will ignore errors in
+// serializing JSON and hits with empty/nil _source will get an empty
+// value
+func (r *SearchResult) Each(typ reflect.Type) []interface{} {
+	if r.Hits == nil || r.Hits.Hits == nil || len(r.Hits.Hits) == 0 {
+		return nil
+	}
+	slice := make([]interface{}, 0, len(r.Hits.Hits))
+	for _, hit := range r.Hits.Hits {
+		v := reflect.New(typ).Elem()
+		if hit.Source == nil {
+			slice = append(slice, v.Interface())
+			continue
+		}
+		if err := json.Unmarshal(hit.Source, v.Addr().Interface()); err == nil {
+			slice = append(slice, v.Interface())
+		}
+	}
+	return slice
 }
 
-// Lenient specifies whether format-based query failures (such as providing
-// text to a numeric field) should be ignored.
-func (s *SearchService) Lenient(lenient bool) *SearchService {
-	s.lenient = &lenient
-	return s
+// SearchHits specifies the list of search hits.
+type SearchHits struct {
+	TotalHits *TotalHits   `json:"total,omitempty"`     // total number of hits found
+	MaxScore  *float64     `json:"max_score,omitempty"` // maximum score of all hits
+	Hits      []*SearchHit `json:"hits,omitempty"`      // the actual hits returned
 }
 
-// MaxResponseSize sets an upper limit on the response body size that we accept,
-// to guard against OOM situations.
-func (s *SearchService) MaxResponseSize(maxResponseSize int64) *SearchService {
-	s.maxResponseSize = maxResponseSize
-	return s
+// NestedHit is a nested innerhit
+type NestedHit struct {
+	Field  string     `json:"field"`
+	Offset int        `json:"offset,omitempty"`
+	Child  *NestedHit `json:"_nested,omitempty"`
 }
 
-// AllowPartialSearchResults indicates if an error should be returned if
-// there is a partial search failure or timeout.
-func (s *SearchService) AllowPartialSearchResults(enabled bool) *SearchService {
-	s.allowPartialSearchResults = &enabled
-	return s
+// TotalHits specifies total number of hits and its relation
+type TotalHits struct {
+	Value    int64  `json:"value"`    // value of the total hit count
+	Relation string `json:"relation"` // how the value should be interpreted: accurate ("eq") or a lower bound ("gte")
 }
 
-// TypedKeys specifies whether aggregation and suggester names should be
-// prefixed by their respective types in the response.
-func (s *SearchService) TypedKeys(enabled bool) *SearchService {
-	s.typedKeys = &enabled
-	return s
+// UnmarshalJSON into TotalHits, accepting both the new response structure
+// in ES 7.x as well as the older response structure in earlier versions.
+// The latter can be enabled with RestTotalHitsAsInt(true).
+func (h *TotalHits) UnmarshalJSON(data []byte) error {
+	if data == nil || string(data) == "null" {
+		return nil
+	}
+	var v struct {
+		Value    int64  `json:"value"`    // value of the total hit count
+		Relation string `json:"relation"` // how the value should be interpreted: accurate ("eq") or a lower bound ("gte")
+	}
+	if err := json.Unmarshal(data, &v); err != nil {
+		var count int64
+		if err2 := json.Unmarshal(data, &count); err2 != nil {
+			return err // return inner error
+		}
+		h.Value = count
+		h.Relation = "eq"
+		return nil
+	}
+	*h = v
+	return nil
 }
 
-// SeqNoPrimaryTerm is an alias for SeqNoAndPrimaryTerm.
-//
-// Deprecated: Use SeqNoAndPrimaryTerm.
-func (s *SearchService) SeqNoPrimaryTerm(enabled bool) *SearchService {
-	return s.SeqNoAndPrimaryTerm(enabled)
+// SearchHit is a single hit.
+type SearchHit struct {
+	Score          *float64                       `json:"_score,omitempty"`   // computed score
+	Index          string                         `json:"_index,omitempty"`   // index name
+	Type           string                         `json:"_type,omitempty"`    // type meta field
+	Id             string                         `json:"_id,omitempty"`      // external or internal
+	Uid            string                         `json:"_uid,omitempty"`     // uid meta field (see MapperService.java for all meta fields)
+	Routing        string                         `json:"_routing,omitempty"` // routing meta field
+	Parent         string                         `json:"_parent,omitempty"`  // parent meta field
+	Version        *int64                         `json:"_version,omitempty"` // version number, when Version is set to true in SearchService
+	SeqNo          *int64                         `json:"_seq_no"`
+	PrimaryTerm    *int64                         `json:"_primary_term"`
+	Sort           []interface{}                  `json:"sort,omitempty"`            // sort information
+	Highlight      SearchHitHighlight             `json:"highlight,omitempty"`       // highlighter information
+	Source         json.RawMessage                `json:"_source,omitempty"`         // stored document source
+	Fields         SearchHitFields                `json:"fields,omitempty"`          // returned (stored) fields
+	Explanation    *SearchExplanation             `json:"_explanation,omitempty"`    // explains how the score was computed
+	MatchedQueries []string                       `json:"matched_queries,omitempty"` // matched queries
+	InnerHits      map[string]*SearchHitInnerHits `json:"inner_hits,omitempty"`      // inner hits with ES >= 1.5.0
+	Nested         *NestedHit                     `json:"_nested,omitempty"`         // for nested inner hits
+	Shard          string                         `json:"_shard,omitempty"`          // used e.g. in Search Explain
+	Node           string                         `json:"_node,omitempty"`           // used e.g. in Search Explain
 }
 
-// SeqNoAndPrimaryTerm specifies whether to return sequence number and
-// primary term of the last modification of each hit.
-func (s *SearchService) SeqNoAndPrimaryTerm(enabled bool) *SearchService {
-	s.seqNoPrimaryTerm = &enabled
-	return s
+// SearchHitFields helps to simplify resolving slices of specific types.
+type SearchHitFields map[string]interface{}
+
+// Strings returns a slice of strings for the given field, if there is any
+// such field in the hit. The method ignores elements that are not of type
+// string.
+func (f SearchHitFields) Strings(fieldName string) ([]string, bool) {
+	slice, ok := f[fieldName].([]interface{})
+	if !ok {
+		return nil, false
+	}
+	results := make([]string, 0, len(slice))
+	for _, item := range slice {
+		if v, ok := item.(string); ok {
+			results = append(results, v)
+		}
+	}
+	return results, true
 }
 
-// BatchedReduceSize specifies the number of shard results that should be reduced
-// at once on the coordinating node. This value should be used as a protection
-// mechanism to reduce the memory overhead per search request if the potential
-// number of shards in the request can be large.
-func (s *SearchService) BatchedReduceSize(size int) *SearchService {
-	s.batchedReduceSize = &size
-	return s
+// Float64s returns a slice of float64's for the given field, if there is any
+// such field in the hit. The method ignores elements that are not of
+// type float64.
+func (f SearchHitFields) Float64s(fieldName string) ([]float64, bool) {
+	slice, ok := f[fieldName].([]interface{})
+	if !ok {
+		return nil, false
+	}
+	results := make([]float64, 0, len(slice))
+	for _, item := range slice {
+		if v, ok := item.(float64); ok {
+			results = append(results, v)
+		}
+	}
+	return results, true
 }
 
-// MaxConcurrentShardRequests specifies the number of concurrent shard requests
-// this search executes concurrently. This value should be used to limit the
-// impact of the search on the cluster in order to limit the number of
-// concurrent shard requests.
-func (s *SearchService) MaxConcurrentShardRequests(max int) *SearchService {
-	s.maxConcurrentShardRequests = &max
-	return s
-}
-
-// PreFilterShardSize specifies a threshold that enforces a pre-filter roundtrip
-// to prefilter search shards based on query rewriting if the number of shards
-// the search request expands to exceeds the threshold. This filter roundtrip
-// can limit the number of shards significantly if for instance a shard can
-// not match any documents based on it's rewrite method i.e. if date filters are
-// mandatory to match but the shard bounds and the query are disjoint.
-func (s *SearchService) PreFilterShardSize(threshold int) *SearchService {
-	s.preFilterShardSize = &threshold
-	return s
-}
-
-// RestTotalHitsAsInt indicates whether hits.total should be rendered as an
-// integer or an object in the rest search response.
-func (s *SearchService) RestTotalHitsAsInt(enabled bool) *SearchService {
-	s.restTotalHitsAsInt = &enabled
-	return s
-}
-
-// CCSMinimizeRoundtrips indicates whether network round-trips should be minimized
-// as part of cross-cluster search requests execution.
-func (s *SearchService) CCSMinimizeRoundtrips(enabled bool) *SearchService {
-	s.ccsMinimizeRoundtrips = &enabled
-	return s
+// SearchHitInnerHits is used for inner hits.
+type SearchHitInnerHits struct {
+	Hits *SearchHits `json:"hits,omitempty"`
 }
 
 // SearchExplanation explains how the score for a hit was computed.
