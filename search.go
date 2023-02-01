@@ -8,40 +8,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
-	"strings"
 )
 
 // Search for documents in Elasticsearch.
 type SearchService struct {
-	pretty     *bool       // pretty format the returned JSON response
-	human      *bool       // return human readable values for statistics
-	errorTrace *bool       // include the stack trace of returned errors
-	filterPath []string    // list of filters used to reduce the response
-	headers    http.Header // custom request-level HTTP headers
-
 	searchSource               *SearchSource // q
 	source                     interface{}
-	searchType                 string // search_type
-	index                      []string
-	typ                        []string
-	routing                    string // routing
-	preference                 string // preference
-	requestCache               *bool  // request_cache
-	ignoreUnavailable          *bool  // ignore_unavailable
-	ignoreThrottled            *bool  // ignore_throttled
-	allowNoIndices             *bool  // allow_no_indices
-	expandWildcards            string // expand_wildcards
-	lenient                    *bool  // lenient
-	maxResponseSize            int64
-	allowPartialSearchResults  *bool // allow_partial_search_results
-	typedKeys                  *bool // typed_keys
-	seqNoPrimaryTerm           *bool // seq_no_primary_term
-	batchedReduceSize          *int  // batched_reduce_size
-	maxConcurrentShardRequests *int  // max_concurrent_shard_requests
-	preFilterShardSize         *int  // pre_filter_shard_size
-	restTotalHitsAsInt         *bool // rest_total_hits_as_int
-
-	ccsMinimizeRoundtrips *bool // ccs_minimize_roundtrips
 }
 
 // NewSearchService creates a new service for searching in Elasticsearch.
@@ -50,46 +22,6 @@ func NewSearchService() *SearchService {
 		searchSource: NewSearchSource(),
 	}
 	return builder
-}
-
-// Pretty tells Elasticsearch whether to return a formatted JSON response.
-func (s *SearchService) Pretty(pretty bool) *SearchService {
-	s.pretty = &pretty
-	return s
-}
-
-// Human specifies whether human readable values should be returned in
-// the JSON response, e.g. "7.5mb".
-func (s *SearchService) Human(human bool) *SearchService {
-	s.human = &human
-	return s
-}
-
-// ErrorTrace specifies whether to include the stack trace of returned errors.
-func (s *SearchService) ErrorTrace(errorTrace bool) *SearchService {
-	s.errorTrace = &errorTrace
-	return s
-}
-
-// FilterPath specifies a list of filters used to reduce the response.
-func (s *SearchService) FilterPath(filterPath ...string) *SearchService {
-	s.filterPath = filterPath
-	return s
-}
-
-// Header adds a header to the request.
-func (s *SearchService) Header(name string, value string) *SearchService {
-	if s.headers == nil {
-		s.headers = http.Header{}
-	}
-	s.headers.Add(name, value)
-	return s
-}
-
-// Headers specifies the headers of the request.
-func (s *SearchService) Headers(headers http.Header) *SearchService {
-	s.headers = headers
-	return s
 }
 
 // SearchSource sets the search source builder to use with this service.
@@ -105,21 +37,6 @@ func (s *SearchService) SearchSource(searchSource *SearchSource) *SearchService 
 // any of the structs and interfaces in Elastic.
 func (s *SearchService) Source(source interface{}) *SearchService {
 	s.source = source
-	return s
-}
-
-// Index sets the names of the indices to use for search.
-func (s *SearchService) Index(index ...string) *SearchService {
-	s.index = append(s.index, index...)
-	return s
-}
-
-// Type adds search restrictions for a list of types.
-//
-// Deprecated: Types are in the process of being removed. Instead of using a type, prefer to
-// filter on a field on the document.
-func (s *SearchService) Type(typ ...string) *SearchService {
-	s.typ = append(s.typ, typ...)
 	return s
 }
 
@@ -166,39 +83,6 @@ func (s *SearchService) TimeoutInMillis(timeoutInMillis int) *SearchService {
 // each shard, upon reaching which the query execution will terminate early.
 func (s *SearchService) TerminateAfter(terminateAfter int) *SearchService {
 	s.searchSource = s.searchSource.TerminateAfter(terminateAfter)
-	return s
-}
-
-// SearchType sets the search operation type. Valid values are:
-// "dfs_query_then_fetch" and "query_then_fetch".
-// See https://www.elastic.co/guide/en/elasticsearch/reference/7.0/search-request-search-type.html
-// for details.
-func (s *SearchService) SearchType(searchType string) *SearchService {
-	s.searchType = searchType
-	return s
-}
-
-// Routing is a list of specific routing values to control the shards
-// the search will be executed on.
-func (s *SearchService) Routing(routings ...string) *SearchService {
-	s.routing = strings.Join(routings, ",")
-	return s
-}
-
-// Preference sets the preference to execute the search. Defaults to
-// randomize across shards ("random"). Can be set to "_local" to prefer
-// local shards, "_primary" to execute on primary shards only,
-// or a custom value which guarantees that the same order will be used
-// across different requests.
-func (s *SearchService) Preference(preference string) *SearchService {
-	s.preference = preference
-	return s
-}
-
-// RequestCache indicates whether the cache should be used for this
-// request or not, defaults to index level setting.
-func (s *SearchService) RequestCache(requestCache bool) *SearchService {
-	s.requestCache = &requestCache
 	return s
 }
 
@@ -389,120 +273,6 @@ func (s *SearchService) DefaultRescoreWindowSize(defaultRescoreWindowSize int) *
 // Rescorer adds a rescorer to the search.
 func (s *SearchService) Rescorer(rescore *Rescore) *SearchService {
 	s.searchSource = s.searchSource.Rescorer(rescore)
-	return s
-}
-
-// IgnoreUnavailable indicates whether the specified concrete indices
-// should be ignored when unavailable (missing or closed).
-func (s *SearchService) IgnoreUnavailable(ignoreUnavailable bool) *SearchService {
-	s.ignoreUnavailable = &ignoreUnavailable
-	return s
-}
-
-// IgnoreThrottled indicates whether specified concrete, expanded or aliased
-// indices should be ignored when throttled.
-func (s *SearchService) IgnoreThrottled(ignoreThrottled bool) *SearchService {
-	s.ignoreThrottled = &ignoreThrottled
-	return s
-}
-
-// AllowNoIndices indicates whether to ignore if a wildcard indices
-// expression resolves into no concrete indices. (This includes `_all` string
-// or when no indices have been specified).
-func (s *SearchService) AllowNoIndices(allowNoIndices bool) *SearchService {
-	s.allowNoIndices = &allowNoIndices
-	return s
-}
-
-// ExpandWildcards indicates whether to expand wildcard expression to
-// concrete indices that are open, closed or both.
-func (s *SearchService) ExpandWildcards(expandWildcards string) *SearchService {
-	s.expandWildcards = expandWildcards
-	return s
-}
-
-// Lenient specifies whether format-based query failures (such as providing
-// text to a numeric field) should be ignored.
-func (s *SearchService) Lenient(lenient bool) *SearchService {
-	s.lenient = &lenient
-	return s
-}
-
-// MaxResponseSize sets an upper limit on the response body size that we accept,
-// to guard against OOM situations.
-func (s *SearchService) MaxResponseSize(maxResponseSize int64) *SearchService {
-	s.maxResponseSize = maxResponseSize
-	return s
-}
-
-// AllowPartialSearchResults indicates if an error should be returned if
-// there is a partial search failure or timeout.
-func (s *SearchService) AllowPartialSearchResults(enabled bool) *SearchService {
-	s.allowPartialSearchResults = &enabled
-	return s
-}
-
-// TypedKeys specifies whether aggregation and suggester names should be
-// prefixed by their respective types in the response.
-func (s *SearchService) TypedKeys(enabled bool) *SearchService {
-	s.typedKeys = &enabled
-	return s
-}
-
-// SeqNoPrimaryTerm is an alias for SeqNoAndPrimaryTerm.
-//
-// Deprecated: Use SeqNoAndPrimaryTerm.
-func (s *SearchService) SeqNoPrimaryTerm(enabled bool) *SearchService {
-	return s.SeqNoAndPrimaryTerm(enabled)
-}
-
-// SeqNoAndPrimaryTerm specifies whether to return sequence number and
-// primary term of the last modification of each hit.
-func (s *SearchService) SeqNoAndPrimaryTerm(enabled bool) *SearchService {
-	s.seqNoPrimaryTerm = &enabled
-	return s
-}
-
-// BatchedReduceSize specifies the number of shard results that should be reduced
-// at once on the coordinating node. This value should be used as a protection
-// mechanism to reduce the memory overhead per search request if the potential
-// number of shards in the request can be large.
-func (s *SearchService) BatchedReduceSize(size int) *SearchService {
-	s.batchedReduceSize = &size
-	return s
-}
-
-// MaxConcurrentShardRequests specifies the number of concurrent shard requests
-// this search executes concurrently. This value should be used to limit the
-// impact of the search on the cluster in order to limit the number of
-// concurrent shard requests.
-func (s *SearchService) MaxConcurrentShardRequests(max int) *SearchService {
-	s.maxConcurrentShardRequests = &max
-	return s
-}
-
-// PreFilterShardSize specifies a threshold that enforces a pre-filter roundtrip
-// to prefilter search shards based on query rewriting if the number of shards
-// the search request expands to exceeds the threshold. This filter roundtrip
-// can limit the number of shards significantly if for instance a shard can
-// not match any documents based on it's rewrite method i.e. if date filters are
-// mandatory to match but the shard bounds and the query are disjoint.
-func (s *SearchService) PreFilterShardSize(threshold int) *SearchService {
-	s.preFilterShardSize = &threshold
-	return s
-}
-
-// RestTotalHitsAsInt indicates whether hits.total should be rendered as an
-// integer or an object in the rest search response.
-func (s *SearchService) RestTotalHitsAsInt(enabled bool) *SearchService {
-	s.restTotalHitsAsInt = &enabled
-	return s
-}
-
-// CCSMinimizeRoundtrips indicates whether network round-trips should be minimized
-// as part of cross-cluster search requests execution.
-func (s *SearchService) CCSMinimizeRoundtrips(enabled bool) *SearchService {
-	s.ccsMinimizeRoundtrips = &enabled
 	return s
 }
 
