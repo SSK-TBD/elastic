@@ -7,6 +7,7 @@ package elastic
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 )
 
@@ -41,7 +42,14 @@ type SearchService struct {
 	restTotalHitsAsInt         *bool // rest_total_hits_as_int
 
 	ccsMinimizeRoundtrips *bool // ccs_minimize_roundtrips
+}
 
+// NewSearchService creates a new service for searching in Elasticsearch.
+func NewSearchService() *SearchService {
+	builder := &SearchService{
+		searchSource: NewSearchSource(),
+	}
+	return builder
 }
 
 // Pretty tells Elasticsearch whether to return a formatted JSON response.
@@ -496,6 +504,176 @@ func (s *SearchService) RestTotalHitsAsInt(enabled bool) *SearchService {
 func (s *SearchService) CCSMinimizeRoundtrips(enabled bool) *SearchService {
 	s.ccsMinimizeRoundtrips = &enabled
 	return s
+}
+
+// SearchResult is the result of a search in Elasticsearch.
+// FIXME: Is this up-to-date?
+type SearchResult struct {
+	Header          http.Header          `json:"-"`
+	TookInMillis    int64                `json:"took,omitempty"`             // search time in milliseconds
+	TerminatedEarly bool                 `json:"terminated_early,omitempty"` // request terminated early
+	NumReducePhases int                  `json:"num_reduce_phases,omitempty"`
+	Clusters        *SearchResultCluster `json:"_clusters,omitempty"`    // 6.1.0+
+	ScrollId        string               `json:"_scroll_id,omitempty"`   // only used with Scroll and Scan operations
+	Hits            *SearchHits          `json:"hits,omitempty"`         // the actual search hits
+	Suggest         SearchSuggest        `json:"suggest,omitempty"`      // results from suggesters
+	Aggregations    Aggregations         `json:"aggregations,omitempty"` // results from aggregations
+	TimedOut        bool                 `json:"timed_out,omitempty"`    // true if the search timed out
+	Error           *ErrorDetails        `json:"error,omitempty"`        // only used in MultiGet
+	Profile         *SearchProfile       `json:"profile,omitempty"`      // profiling results, if optional Profile API was active for this search
+	Shards          *ShardsInfo          `json:"_shards,omitempty"`      // shard information
+	Status          int                  `json:"status,omitempty"`       // used in MultiSearch
+	PitId           string               `json:"pit_id,omitempty"`       // Point In Time ID
+}
+
+// SearchResultCluster holds information about a search response
+// from a cluster.
+type SearchResultCluster struct {
+	Successful int `json:"successful,omitempty"`
+	Total      int `json:"total,omitempty"`
+	Skipped    int `json:"skipped,omitempty"`
+}
+
+// TotalHits is a convenience function to return the number of hits for
+// a search result. The return value might not be accurate, unless
+// track_total_hits parameter has set to true.
+func (r *SearchResult) TotalHits() int64 {
+	if r != nil && r.Hits != nil && r.Hits.TotalHits != nil {
+		return r.Hits.TotalHits.Value
+	}
+	return 0
+}
+
+// Each is a utility function to iterate over all hits. It saves you from
+// checking for nil values. Notice that Each will ignore errors in
+// serializing JSON and hits with empty/nil _source will get an empty
+// value
+func (r *SearchResult) Each(typ reflect.Type) []interface{} {
+	if r.Hits == nil || r.Hits.Hits == nil || len(r.Hits.Hits) == 0 {
+		return nil
+	}
+	slice := make([]interface{}, 0, len(r.Hits.Hits))
+	for _, hit := range r.Hits.Hits {
+		v := reflect.New(typ).Elem()
+		if hit.Source == nil {
+			slice = append(slice, v.Interface())
+			continue
+		}
+		if err := json.Unmarshal(hit.Source, v.Addr().Interface()); err == nil {
+			slice = append(slice, v.Interface())
+		}
+	}
+	return slice
+}
+
+// SearchHits specifies the list of search hits.
+type SearchHits struct {
+	TotalHits *TotalHits   `json:"total,omitempty"`     // total number of hits found
+	MaxScore  *float64     `json:"max_score,omitempty"` // maximum score of all hits
+	Hits      []*SearchHit `json:"hits,omitempty"`      // the actual hits returned
+}
+
+// NestedHit is a nested innerhit
+type NestedHit struct {
+	Field  string     `json:"field"`
+	Offset int        `json:"offset,omitempty"`
+	Child  *NestedHit `json:"_nested,omitempty"`
+}
+
+// TotalHits specifies total number of hits and its relation
+type TotalHits struct {
+	Value    int64  `json:"value"`    // value of the total hit count
+	Relation string `json:"relation"` // how the value should be interpreted: accurate ("eq") or a lower bound ("gte")
+}
+
+// UnmarshalJSON into TotalHits, accepting both the new response structure
+// in ES 7.x as well as the older response structure in earlier versions.
+// The latter can be enabled with RestTotalHitsAsInt(true).
+func (h *TotalHits) UnmarshalJSON(data []byte) error {
+	if data == nil || string(data) == "null" {
+		return nil
+	}
+	var v struct {
+		Value    int64  `json:"value"`    // value of the total hit count
+		Relation string `json:"relation"` // how the value should be interpreted: accurate ("eq") or a lower bound ("gte")
+	}
+	if err := json.Unmarshal(data, &v); err != nil {
+		var count int64
+		if err2 := json.Unmarshal(data, &count); err2 != nil {
+			return err // return inner error
+		}
+		h.Value = count
+		h.Relation = "eq"
+		return nil
+	}
+	*h = v
+	return nil
+}
+
+// SearchHit is a single hit.
+type SearchHit struct {
+	Score          *float64                       `json:"_score,omitempty"`   // computed score
+	Index          string                         `json:"_index,omitempty"`   // index name
+	Type           string                         `json:"_type,omitempty"`    // type meta field
+	Id             string                         `json:"_id,omitempty"`      // external or internal
+	Uid            string                         `json:"_uid,omitempty"`     // uid meta field (see MapperService.java for all meta fields)
+	Routing        string                         `json:"_routing,omitempty"` // routing meta field
+	Parent         string                         `json:"_parent,omitempty"`  // parent meta field
+	Version        *int64                         `json:"_version,omitempty"` // version number, when Version is set to true in SearchService
+	SeqNo          *int64                         `json:"_seq_no"`
+	PrimaryTerm    *int64                         `json:"_primary_term"`
+	Sort           []interface{}                  `json:"sort,omitempty"`            // sort information
+	Highlight      SearchHitHighlight             `json:"highlight,omitempty"`       // highlighter information
+	Source         json.RawMessage                `json:"_source,omitempty"`         // stored document source
+	Fields         SearchHitFields                `json:"fields,omitempty"`          // returned (stored) fields
+	Explanation    *SearchExplanation             `json:"_explanation,omitempty"`    // explains how the score was computed
+	MatchedQueries []string                       `json:"matched_queries,omitempty"` // matched queries
+	InnerHits      map[string]*SearchHitInnerHits `json:"inner_hits,omitempty"`      // inner hits with ES >= 1.5.0
+	Nested         *NestedHit                     `json:"_nested,omitempty"`         // for nested inner hits
+	Shard          string                         `json:"_shard,omitempty"`          // used e.g. in Search Explain
+	Node           string                         `json:"_node,omitempty"`           // used e.g. in Search Explain
+}
+
+// SearchHitFields helps to simplify resolving slices of specific types.
+type SearchHitFields map[string]interface{}
+
+// Strings returns a slice of strings for the given field, if there is any
+// such field in the hit. The method ignores elements that are not of type
+// string.
+func (f SearchHitFields) Strings(fieldName string) ([]string, bool) {
+	slice, ok := f[fieldName].([]interface{})
+	if !ok {
+		return nil, false
+	}
+	results := make([]string, 0, len(slice))
+	for _, item := range slice {
+		if v, ok := item.(string); ok {
+			results = append(results, v)
+		}
+	}
+	return results, true
+}
+
+// Float64s returns a slice of float64's for the given field, if there is any
+// such field in the hit. The method ignores elements that are not of
+// type float64.
+func (f SearchHitFields) Float64s(fieldName string) ([]float64, bool) {
+	slice, ok := f[fieldName].([]interface{})
+	if !ok {
+		return nil, false
+	}
+	results := make([]float64, 0, len(slice))
+	for _, item := range slice {
+		if v, ok := item.(float64); ok {
+			results = append(results, v)
+		}
+	}
+	return results, true
+}
+
+// SearchHitInnerHits is used for inner hits.
+type SearchHitInnerHits struct {
+	Hits *SearchHits `json:"hits,omitempty"`
 }
 
 // SearchExplanation explains how the score for a hit was computed.
