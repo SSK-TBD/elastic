@@ -25,7 +25,7 @@ jobs:
         go-version-file: 'go.mod'
 
     - name: Run Docker containers
-      run: docker-compose up -d
+      run: docker compose up -d
 
     - name: Check Docker containers
       run: docker ps -a
