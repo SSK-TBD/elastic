@@ -13,7 +13,7 @@ jobs:
     steps:
     - name: Prepare tests
       run: |
-        sudo apt-get install -y netcat
+        sudo apt-get install -y netcat-openbsd
         sudo sysctl -w vm.max_map_count=262144
 
     - name: Checkout code
